@@ -1,3 +1,7 @@
+/*
+    Copyright (C) 2014 Erwin Rieger for UltiGCode USB store and
+    print modifications.
+*/
 #include <avr/pgmspace.h>
 
 #include "Configuration.h"
@@ -146,7 +150,7 @@ static void cardUpdir()
     card.updir();
 }
 
-static char* lcd_sd_menu_filename_callback(uint8_t nr)
+char* lcd_sd_menu_filename_callback(uint8_t nr)
 {
     //This code uses the card.longFilename as buffer to store the filename, to save memory.
     if (nr == 0)
@@ -241,6 +245,8 @@ void lcd_sd_menu_details_callback(uint8_t nr)
                         card.clearError();
                         LCD_DETAIL_CACHE_ID() = 255;
                     }
+                    if (card.isFileOpen())
+                      card.closefile();
                 }
 
                 if (LCD_DETAIL_CACHE_TIME() > 0)
@@ -338,15 +344,32 @@ void lcd_menu_print_select()
             card.getfilename(selIndex - 1);
             if (!card.filenameIsDir)
             {
+
+                printSelectedFile(card.filename);
+
+            }else{
+                lcd_lib_beep();
+                lcd_clear_cache();
+                card.chdir(card.filename);
+                SELECT_SCROLL_MENU_ITEM(0);
+            }
+            return;//Return so we do not continue after changing the directory or selecting a file. The nrOfFiles is invalid at this point.
+        }
+    }
+    lcd_scroll_menu(PSTR("SD CARD"), nrOfFiles+1, lcd_sd_menu_filename_callback, lcd_sd_menu_details_callback);
+}
+
+void printSelectedFile(char *filename) {
+
                 //Start print
                 active_extruder = 0;
-                card.openFile(card.filename, true);
+                card.openFile(filename, true);
                 if (card.isFileOpen() && !is_command_queued())
                 {
                     if (led_mode == LED_MODE_WHILE_PRINTING || led_mode == LED_MODE_BLINK_ON_DONE)
                         analogWrite(LED_PIN, 255 * int(led_brightness_level) / 100);
                     if (!card.longFilename[0])
-                        strcpy(card.longFilename, card.filename);
+                        strcpy(card.longFilename, filename);
                     card.longFilename[20] = '\0';
                     if (strchr(card.longFilename, '.')) strchr(card.longFilename, '.')[0] = '\0';
 
@@ -360,7 +383,7 @@ void lcd_menu_print_select()
                         buffer[sizeof(buffer)-1] = '\0';
                         while (strlen(buffer) > 0 && buffer[strlen(buffer)-1] < ' ') buffer[strlen(buffer)-1] = '\0';
                     }
-                    card.setIndex(0);
+                    card.setReadFilePos(0);
                     if (strcmp_P(buffer, PSTR(";FLAVOR:UltiGCode")) == 0)
                     {
                         //New style GCode flavor without start/end code.
@@ -396,16 +419,6 @@ void lcd_menu_print_select()
                         lcd_change_to_menu(lcd_menu_print_classic_warning, MAIN_MENU_ITEM_POS(0));
                     }
                 }
-            }else{
-                lcd_lib_beep();
-                lcd_clear_cache();
-                card.chdir(card.filename);
-                SELECT_SCROLL_MENU_ITEM(0);
-            }
-            return;//Return so we do not continue after changing the directory or selecting a file. The nrOfFiles is invalid at this point.
-        }
-    }
-    lcd_scroll_menu(PSTR("SD CARD"), nrOfFiles+1, lcd_sd_menu_filename_callback, lcd_sd_menu_details_callback);
 }
 
 static void lcd_menu_print_heatup()
@@ -468,7 +481,7 @@ static void lcd_menu_print_heatup()
 static void lcd_menu_print_printing()
 {
     lcd_question_screen(lcd_menu_print_tune, NULL, PSTR("TUNE"), lcd_menu_print_abort, NULL, PSTR("ABORT"));
-    uint8_t progress = card.getFilePos() / ((card.getFileSize() + 123) / 124);
+    uint8_t progress = card.getReadFilePos() / ((card.getFileSize() + 123) / 124);
     char buffer[16];
     char* c;
     switch(printing_state)
@@ -499,7 +512,7 @@ static void lcd_menu_print_printing()
     }
     float printTimeMs = (millis() - starttime);
     float printTimeSec = printTimeMs / 1000L;
-    float totalTimeMs = float(printTimeMs) * float(card.getFileSize()) / float(card.getFilePos());
+    float totalTimeMs = float(printTimeMs) * float(card.getFileSize()) / float(card.getReadFilePos());
     static float totalTimeSmoothSec;
     totalTimeSmoothSec = (totalTimeSmoothSec * 999L + totalTimeMs / 1000L) / 1000L;
     if (isinf(totalTimeSmoothSec))

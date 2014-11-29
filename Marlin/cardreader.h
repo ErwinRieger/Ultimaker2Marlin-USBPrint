@@ -1,3 +1,7 @@
+/*
+    Copyright (C) 2014 Erwin Rieger for UltiGCode USB store and
+    print modifications.
+*/
 #ifndef CARDREADER_H
 #define CARDREADER_H
 
@@ -51,15 +55,30 @@ public:
 
 
   FORCE_INLINE bool isFileOpen() { return file.isOpen(); }
-  FORCE_INLINE bool eof() { return sdpos>=filesize ;};
-  FORCE_INLINE int16_t get() {  sdpos = file.curPosition();return (int16_t)file.read();};
-  FORCE_INLINE int16_t fgets(char* str, int16_t num) { return file.fgets(str, num, NULL); }
-  FORCE_INLINE void setIndex(long index) {sdpos = index;file.seekSet(index);};
-  FORCE_INLINE uint8_t percentDone(){if(!isFileOpen()) return 0; if(filesize) return sdpos/((filesize+99)/100); else return 0;};
+  FORCE_INLINE bool eof() { return sdReadPos >= getFileSize() ;};
+  FORCE_INLINE int16_t get() {
+      // sdReadPos  = file.curPosition();return (int16_t)file.read();
+      file.seekSet(sdReadPos);
+      int16_t c = file.read();
+      if (c != -1)
+        sdReadPos++;
+      return c; }
+
+  FORCE_INLINE int16_t fgets(char* str, int16_t num) {
+    if (! file.seekSet(sdReadPos)) 
+      MYSERIAL.print("fgets: can't seek\n");
+
+    int16_t readbytes = file.fgets(str, num, NULL);
+    sdReadPos += readbytes;
+    return readbytes;
+   }
+
+  FORCE_INLINE void setReadFilePos(long index) {sdReadPos  = index; /* file.seekSet(index); */};
+  FORCE_INLINE uint8_t percentDone(){if(!isFileOpen()) return 0; if(getFileSize()) return sdReadPos /((getFileSize()+99)/100); else return 0;};
   FORCE_INLINE char* getWorkDirName(){workDir.getFilename(filename);return filename;};
   FORCE_INLINE bool atRoot() { return workDirDepth==0; }
-  FORCE_INLINE uint32_t getFilePos() { return sdpos; }
-  FORCE_INLINE uint32_t getFileSize() { return filesize; }
+  FORCE_INLINE uint32_t getReadFilePos() { return sdReadPos ; }
+  FORCE_INLINE uint32_t getFileSize() { return file.fileSize(); }
   FORCE_INLINE bool isOk() { return cardOK && card.errorCode() == 0; }
   FORCE_INLINE int errorCode() { return card.errorCode(); }
   FORCE_INLINE void clearError() { card.error(0); }
@@ -95,10 +114,9 @@ private:
   Sd2Card card;
   SdVolume volume;
   SdFile file;
-  uint32_t filesize;
   //int16_t n;
   unsigned long autostart_atmillis;
-  uint32_t sdpos ;
+  uint32_t sdReadPos  ;
 
   bool autostart_stilltocheck; //the sd start is delayed, because otherwise the serial cannot answer fast enought to make contact with the hostsoftware.
 
@@ -106,6 +124,8 @@ private:
   int16_t nrFiles; //counter for the files in the current directory and recycled as position counter for getting the nrFiles'th name in the directory.
   char* diveDirName;
   void lsDive(const char *prepend,SdFile parent);
+  // Number of open calls minus number of close calls
+  unsigned char opencount;
 };
 extern CardReader card;
 #define IS_SD_PRINTING (card.sdprinting)

@@ -1,3 +1,7 @@
+/*
+    Copyright (C) 2014 Erwin Rieger for UltiGCode USB store and
+    print modifications.
+*/
 #include "Configuration.h"
 #ifdef ENABLE_ULTILCD2
 #include "UltiLCD2.h"
@@ -16,6 +20,13 @@
 
 unsigned long lastSerialCommandTime;
 bool serialScreenShown;
+
+// Print start over serial/usb
+static unsigned long lastStartCheck;
+// Filename in 8.3 format, written by Marlin_main.cpp:process_commands(), serial
+// command 'M623'.
+char fnAutoPrint[13] = { '\0' };
+
 uint8_t led_brightness_level = 100;
 uint8_t led_mode = LED_MODE_ALWAYS_ON;
 
@@ -27,6 +38,8 @@ static void lcd_menu_special_startup();
 #endif//SPECIAL_STARTUP
 
 static void lcd_menu_breakout();
+
+static void lcd_menu_autoStart();
 
 void lcd_init()
 {
@@ -45,6 +58,7 @@ void lcd_init()
 
 void lcd_update()
 {
+
     if (!lcd_lib_update_ready()) return;
     lcd_lib_buttons_update();
     card.updateSDInserted();
@@ -91,10 +105,29 @@ void lcd_update()
             break;
         }
         lcd_lib_draw_stringP(1, 40, PSTR("Contact:"));
-        lcd_lib_draw_stringP(1, 50, PSTR("support@ultimaker.com"));
+        lcd_lib_draw_stringP(1, 50, PSTR( "support@ultimaker.com" ));
         LED_GLOW_ERROR();
         lcd_lib_update_screen();
-    }else if (millis() - lastSerialCommandTime < SERIAL_CONTROL_TIMEOUT)
+    }
+    // Check autoprint variable if a file should be printed (M623 command)
+    else if (
+        (fnAutoPrint[0] != '\0') && 
+        card.sdInserted && 
+        (currentMenu == lcd_menu_main))
+    {
+
+        // if (card.isFileOpen()) {
+            // SERIAL_ECHOLNPGM("WARNING: file is open while autostarting...!");
+        // }
+
+        // Prepare for usb-print, wait 10 seconds
+        // serialScreenShown = false;
+
+        lastStartCheck = millis();
+
+        lcd_change_to_menu(lcd_menu_autoStart);
+    }
+    else if (millis() - lastSerialCommandTime < SERIAL_CONTROL_TIMEOUT)
     {
         if (!serialScreenShown)
         {
@@ -319,6 +352,76 @@ static void lcd_menu_breakout()
     lcd_lib_draw_box(ball_x >> 8, ball_y >> 8, (ball_x >> 8) + 2, (ball_y >> 8) + 2);
     lcd_lib_draw_box(lcd_lib_encoder_pos * 2, 60, lcd_lib_encoder_pos * 2 + BREAKOUT_PADDLE_WIDTH, 63);
     lcd_lib_update_screen();
+}
+
+void lcd_menu_autoStart()
+{
+    char buffer[64];
+    int waited = (millis() - lastStartCheck)/1000;
+
+    if (!card.isOk()) {
+        lcd_info_screen(lcd_menu_main);
+        lcd_lib_draw_string_centerP(16, PSTR("Reading card..."));
+        lcd_lib_update_screen();
+        lcd_clear_cache();
+        card.initsd();
+        return;
+    }
+
+    // Prepare for usb-print, wait 5 seconds
+
+    lcd_lib_clear();
+    sprintf_P(buffer, PSTR("Wait '%s' %d/5s"), fnAutoPrint, waited);
+    lcd_lib_draw_string(1, 20, buffer);
+    lcd_lib_update_screen();
+
+    if (waited >= 5) {
+
+        // Check for "autoprint" file in root dir
+        card.openFile(fnAutoPrint, true);
+        if (card.isFileOpen()) {
+
+            card.closefile();
+
+            lcd_lib_draw_string(1, 30, "got it...");
+            lcd_lib_draw_string(1, 40, "start print...");
+
+            lcd_lib_beep();
+
+            //
+            // Find filenumber for downloaded file and update cache:
+            //
+            // cache-id: filenumber
+            // cache-type: 0: file, 1: folder
+            //
+            uint16_t fileCnt = card.getnrfilenames();
+
+            for(uint16_t i=0;i<fileCnt;i++)
+            {
+                card.getfilename(i);
+                // SERIAL_ECHO("update cache, i, filename: ");
+                // SERIAL_ECHOLN(i);
+                // SERIAL_ECHOLN(" ");
+                // SERIAL_ECHOLN(card.filename);
+                // XXX card.filename is uppercase!
+                if (strcmp(card.filename, fnAutoPrint) == 0) {
+
+                    // Update "Name-Cache"
+                    lcd_sd_menu_filename_callback(i+1);
+                    lcd_sd_menu_details_callback(i+1);
+                    break;
+                }
+            }
+
+            printSelectedFile(fnAutoPrint);
+        }
+        else {
+            lcd_change_to_menu(lcd_menu_main);
+        }
+
+        // Unset autoprint variable to prevent 'print-loop'
+        fnAutoPrint[0] = '\0';
+    }
 }
 
 /* Warning: This function is called from interrupt context */

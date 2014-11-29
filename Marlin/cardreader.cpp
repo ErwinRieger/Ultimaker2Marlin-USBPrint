@@ -1,3 +1,7 @@
+/*
+    Copyright (C) 2014 Erwin Rieger for UltiGCode USB store and
+    print modifications.
+*/
 #include "Marlin.h"
 #include "cardreader.h"
 #include "UltiLCD2.h"
@@ -12,8 +16,7 @@
 
 CardReader::CardReader()
 {
-   filesize = 0;
-   sdpos = 0;
+   sdReadPos  = 0;
    sdprinting = false;
    pause = false;
    cardOK = false;
@@ -31,7 +34,9 @@ CardReader::CardReader()
     WRITE(SDPOWER,HIGH);
   #endif //SDPOWER
 
-  autostart_atmillis=millis()+5000;
+    autostart_atmillis=millis()+5000;
+
+    opencount = 0;
 }
 
 char *createFilename(char *buffer,const dir_t &p) //buffer>12characters
@@ -202,6 +207,7 @@ void CardReader::release()
   sdprinting = false;
   pause = false;
   cardOK = false;
+  opencount = 0;
 }
 
 void CardReader::startFileprint()
@@ -228,14 +234,19 @@ void CardReader::openLogFile(const char* name)
   openFile(name, false);
 }
 
-void CardReader::openFile(const char* name,bool read)
+void CardReader::openFile(const char* name, bool read)
 {
   if(!cardOK)
     return;
-  file.close();
+
+  // file.close();
+  if (opencount == 0 && file.isOpen()) {
+    SERIAL_ERRORLNPGM("ERROR: openFile(): file already opened!");
+    file.close();
+  }
+
   sdprinting = false;
   pause = false;
-
 
   SdFile myDir;
   curDir=&root;
@@ -285,19 +296,27 @@ void CardReader::openFile(const char* name,bool read)
   {
     curDir=&workDir;
   }
+
   if(read)
   {
-    if (file.open(curDir, fname, O_READ))
+    // Don't open for reading if already opened for RW
+    if (opencount || file.open(curDir, fname, O_READ))
     {
-      filesize = file.fileSize();
       SERIAL_PROTOCOLPGM(MSG_SD_FILE_OPENED);
       SERIAL_PROTOCOL(fname);
       SERIAL_PROTOCOLPGM(MSG_SD_SIZE);
-      SERIAL_PROTOCOLLN(filesize);
-      sdpos = 0;
+      SERIAL_PROTOCOLLN(getFileSize());
+      sdReadPos  = 0;
 
       SERIAL_PROTOCOLLNPGM(MSG_SD_FILE_SELECTED);
       lcd_setstatus(fname);
+
+      opencount++;
+
+      // xxx debug
+      char buffer[64];
+      sprintf_P(buffer, PSTR("openfile(%s), opencount:  %d"), name, opencount);
+      SERIAL_ECHOLN(buffer);
     }
     else
     {
@@ -308,7 +327,9 @@ void CardReader::openFile(const char* name,bool read)
   }
   else
   { //write
-    if (!file.open(curDir, fname, O_CREAT | O_APPEND | O_WRITE | O_TRUNC))
+    // Mod ERRI: open in Read/Write mode
+    // if (!file.open(curDir, fname, O_CREAT | O_APPEND | O_WRITE | O_TRUNC))
+    if (!file.open(curDir, fname, O_CREAT | O_APPEND | O_RDWR | O_TRUNC))
     {
       SERIAL_PROTOCOLPGM(MSG_SD_OPEN_FILE_FAIL);
       SERIAL_PROTOCOL(fname);
@@ -320,19 +341,31 @@ void CardReader::openFile(const char* name,bool read)
       SERIAL_PROTOCOLPGM(MSG_SD_WRITE_TO_FILE);
       SERIAL_PROTOCOLLN(name);
       lcd_setstatus(fname);
+
+      opencount++;
+
+      // xxx debug
+      char buffer[64];
+      sprintf_P(buffer, PSTR("openfile(%s), opencount:  %d"), name, opencount);
+      SERIAL_ECHOLN(buffer);
     }
   }
-
 }
 
 void CardReader::removeFile(const char* name)
 {
   if(!cardOK)
     return;
-  file.close();
+
+  if (file.isOpen()) {
+    SERIAL_ERRORLNPGM("ERROR: removeFile(): file still open!");
+    file.close();
+  }
+
   sdprinting = false;
   pause = false;
 
+  opencount = 0;
 
   SdFile myDir;
   curDir=&root;
@@ -386,7 +419,7 @@ void CardReader::removeFile(const char* name)
     {
       SERIAL_PROTOCOLPGM("File deleted:");
       SERIAL_PROTOCOL(fname);
-      sdpos = 0;
+      sdReadPos  = 0;
     }
     else
     {
@@ -401,9 +434,9 @@ void CardReader::getStatus()
 {
   if(cardOK){
     SERIAL_PROTOCOLPGM(MSG_SD_PRINTING_BYTE);
-    SERIAL_PROTOCOL(sdpos);
+    SERIAL_PROTOCOL(sdReadPos );
     SERIAL_PROTOCOLPGM("/");
-    SERIAL_PROTOCOLLN(filesize);
+    SERIAL_PROTOCOLLN(getFileSize());
   }
   else{
     SERIAL_PROTOCOLLNPGM(MSG_SD_NOT_PRINTING);
@@ -497,10 +530,27 @@ void CardReader::checkautostart(bool force)
 
 void CardReader::closefile()
 {
+
   file.sync();
-  file.close();
-  saving = false;
   logging = false;
+
+  if (opencount < 1) {
+    SERIAL_ERRORLNPGM("Warning: closefile(): file not open.");
+    return;
+  }
+
+  opencount--;
+
+  // xxx debug
+  char buffer[64], fn[13];
+  file.getFilename(fn), 
+  sprintf_P(buffer, PSTR("closefile(%s), opencount:  %d"), fn, opencount);
+  SERIAL_ECHOLN(buffer);
+
+  if (! opencount) {
+    saving = false;
+    file.close();
+  }
 }
 
 void CardReader::getfilename(const uint8_t nr)

@@ -3,6 +3,8 @@
 /*
     Reprap firmware based on Sprinter and grbl.
  Copyright (C) 2011 Camiel Gubbels / Erik van der Zalm
+ Copyright (C) 2014 Erwin Rieger for UltiGCode USB store and
+ print modifications.
 
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -141,6 +143,7 @@
 // M503 - print the current settings (from memory not from eeprom)
 // M540 - Use S[0|1] to enable or disable the stop SD card print on endstop hit (requires ABORT_ON_ENDSTOP_HIT_FEATURE_ENABLED)
 // M600 - Pause for filament change X[pos] Y[pos] Z[relative lift] E[initial retract] L[later retract distance for removal]
+// M623 - Select SD file (M623 filename.g) for ultimaker2 print, print is started by UM2 gui software.
 // M907 - Set digital trimpot motor current using axis codes.
 // M908 - Control digital trimpot directly.
 // M350 - Set microstepping mode.
@@ -235,19 +238,33 @@ static float delta[3] = {0.0, 0.0, 0.0};
 static float offset[3] = {0.0, 0.0, 0.0};
 static bool home_all_axis = true;
 static float feedrate = 1500.0, next_feedrate, saved_feedrate;
-static long gcode_N, gcode_LastN, Stopped_gcode_LastN = 0;
+static long gcode_LastN, Stopped_gcode_LastN = 0;
 
 static bool relative_mode = false;  //Determines Absolute or Relative Coordinates
 
+// Ringbuffer of max. BUFSIZE commands of max. MAX_CMD_SIZE len.
 static char cmdbuffer[BUFSIZE][MAX_CMD_SIZE];
+// Flag, send acknowledge for this command on serial port.
 static bool fromsd[BUFSIZE];
+// Readpointer, next command in ringbuffer.
 static int bufindr = 0;
+// Writepointer, where to write next command into ringbuffer.
 static int bufindw = 0;
+// Number of commands in rigbuffer.
 static int buflen = 0;
+
+// Usb/serial read buffer of max. MAX_CMD_SIZE size.
+static char usbCmdBuffer[MAX_CMD_SIZE];
+
+// Structure to store the result of get_command_usb()
+struct UsbCommand {
+  // Number of characters read for current command
+  int serial_count;
+  // Poniter to Usb/serial read buffer.
+  char *buffer;
+};
+
 //static int i = 0;
-static char serial_char;
-static int serial_count = 0;
-static boolean comment_mode = false;
 static char *strchr_pointer; // just a pointer to find chars in the cmd string like X, Y, Z, E, etc
 
 const int sensitive_pins[] = SENSITIVE_PINS; // Sensitive pin list for M42
@@ -275,6 +292,10 @@ uint8_t Stopped = false;
 //===========================================================================
 //=============================ROUTINES=============================
 //===========================================================================
+
+char * get_command_usb(UsbCommand *usbCommand, bool cardSaving);
+void get_command_sd();
+void process_commands();
 
 void get_arc_coordinates();
 bool setTargetedHotend(int code);
@@ -481,41 +502,82 @@ void setup()
 
 void loop()
 {
-  if(buflen < (BUFSIZE-1))
-    get_command();
+
+  static UsbCommand usbCommand = { 0, NULL };
+
+  char *usbCmd;
+
+  // Set if we are storing to sdcard
+  bool cardSaving = false;
+ 
   #ifdef SDSUPPORT
-  card.checkautostart(false);
+  cardSaving = card.saving;
   #endif
-  if(buflen)
-  {
-    #ifdef SDSUPPORT
-      if(card.saving)
+
+  if(cardSaving) {
+
+    // Get command from usb and store command on SD
+    usbCommand.buffer = usbCmdBuffer;
+    usbCmd = get_command_usb(&usbCommand, cardSaving);
+
+    if (usbCmd) {
+
+      if(strstr_P(usbCmd, PSTR("M29")) == NULL)
       {
-        if(strstr_P(cmdbuffer[bufindr], PSTR("M29")) == NULL)
+
+        // SD write.
+        card.write_command(usbCmd);
+
+        #if 0
+        // XXX What is "SD Logging" and why do we process the
+        // command(s) here?
+        if(card.logging)
         {
-          card.write_command(cmdbuffer[bufindr]);
-          if(card.logging)
-          {
-            process_commands();
-          }
-          else
-          {
-            SERIAL_PROTOCOLLNPGM(MSG_OK);
-          }
+          process_commands();
         }
         else
         {
-          card.closefile();
-          SERIAL_PROTOCOLLNPGM(MSG_FILE_SAVED);
+        #endif
+          // Command-cknowledge over serial line.
+          SERIAL_PROTOCOLLNPGM(MSG_OK);
+        #if 0
         }
+        #endif
       }
       else
       {
-        process_commands();
+        // End SD write.
+        card.closefile();
+        SERIAL_PROTOCOLLNPGM(MSG_FILE_SAVED);
       }
-    #else
-      process_commands();
-    #endif //SDSUPPORT
+    }
+  }
+  else {
+
+    // Store command from usb into the command ring buffer for later processing
+    usbCommand.buffer = cmdbuffer[bufindw];
+    usbCmd = get_command_usb(&usbCommand, cardSaving);
+    if (usbCmd) {
+
+        fromsd[bufindw] = false;
+        bufindw = (bufindw + 1)%BUFSIZE;
+        buflen += 1;
+    }
+  }
+
+  // Get command from sdcard and store it into the command ring buffer
+  if((buflen < (BUFSIZE-1)) && (usbCommand.serial_count == 0))
+      get_command_sd();
+
+  #ifdef SDSUPPORT
+  card.checkautostart(false);
+  #endif
+
+  if(buflen)
+  {
+    // Process command from sd or from usb
+    process_commands();
+
     if (buflen > 0)
     {
       buflen = (buflen-1);
@@ -530,128 +592,22 @@ void loop()
   lifetime_stats_tick();
 }
 
-void get_command()
+void get_command_sd()
 {
-  while( MYSERIAL.available() > 0  && buflen < BUFSIZE) {
-    serial_char = MYSERIAL.read();
-    if(serial_char == '\n' ||
-       serial_char == '\r' ||
-       (serial_char == ':' && comment_mode == false) ||
-       serial_count >= (MAX_CMD_SIZE - 1) )
-    {
-      if(!serial_count) { //if empty line
-        comment_mode = false; //for new command
-        return;
-      }
-      cmdbuffer[bufindw][serial_count] = 0; //terminate string
-      if(!comment_mode){
-        comment_mode = false; //for new command
-        fromsd[bufindw] = false;
-        if(strchr(cmdbuffer[bufindw], 'N') != NULL)
-        {
-          strchr_pointer = strchr(cmdbuffer[bufindw], 'N');
-          gcode_N = (strtol(&cmdbuffer[bufindw][strchr_pointer - cmdbuffer[bufindw] + 1], NULL, 10));
-          if(gcode_N != gcode_LastN+1 && (strstr_P(cmdbuffer[bufindw], PSTR("M110")) == NULL) ) {
-            SERIAL_ERROR_START;
-            SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
-            SERIAL_ERRORLN(gcode_LastN);
-            //Serial.println(gcode_N);
-            FlushSerialRequestResend();
-            serial_count = 0;
-            return;
-          }
-
-          if(strchr(cmdbuffer[bufindw], '*') != NULL)
-          {
-            byte checksum = 0;
-            byte count = 0;
-            while(cmdbuffer[bufindw][count] != '*') checksum = checksum^cmdbuffer[bufindw][count++];
-            strchr_pointer = strchr(cmdbuffer[bufindw], '*');
-
-            if( (int)(strtod(&cmdbuffer[bufindw][strchr_pointer - cmdbuffer[bufindw] + 1], NULL)) != checksum) {
-              SERIAL_ERROR_START;
-              SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
-              SERIAL_ERRORLN(gcode_LastN);
-              FlushSerialRequestResend();
-              serial_count = 0;
-              return;
-            }
-            //if no errors, continue parsing
-          }
-          else
-          {
-            SERIAL_ERROR_START;
-            SERIAL_ERRORPGM(MSG_ERR_NO_CHECKSUM);
-            SERIAL_ERRORLN(gcode_LastN);
-            FlushSerialRequestResend();
-            serial_count = 0;
-            return;
-          }
-
-          gcode_LastN = gcode_N;
-          //if no errors, continue parsing
-        }
-        else  // if we don't receive 'N' but still see '*'
-        {
-          if((strchr(cmdbuffer[bufindw], '*') != NULL))
-          {
-            SERIAL_ERROR_START;
-            SERIAL_ERRORPGM(MSG_ERR_NO_LINENUMBER_WITH_CHECKSUM);
-            SERIAL_ERRORLN(gcode_LastN);
-            serial_count = 0;
-            return;
-          }
-        }
-        if((strchr(cmdbuffer[bufindw], 'G') != NULL)){
-          strchr_pointer = strchr(cmdbuffer[bufindw], 'G');
-          switch((int)((strtod(&cmdbuffer[bufindw][strchr_pointer - cmdbuffer[bufindw] + 1], NULL)))){
-          case 0:
-          case 1:
-          case 2:
-          case 3:
-            if(Stopped == false) { // If printer is stopped by an error the G[0-3] codes are ignored.
-          #ifdef SDSUPPORT
-              if(card.saving)
-                break;
-          #endif //SDSUPPORT
-              SERIAL_PROTOCOLLNPGM(MSG_OK);
-            }
-            else {
-              SERIAL_ERRORLNPGM(MSG_ERR_STOPPED);
-              LCD_MESSAGEPGM(MSG_STOPPED);
-            }
-            break;
-          default:
-            break;
-          }
-
-        }
-#ifdef ENABLE_ULTILCD2
-        strchr_pointer = strchr(cmdbuffer[bufindw], 'M');
-        if (strtol(&cmdbuffer[bufindw][strchr_pointer - cmdbuffer[bufindw] + 1], NULL, 10) != 105)
-            lastSerialCommandTime = millis();
-#endif
-        bufindw = (bufindw + 1)%BUFSIZE;
-        buflen += 1;
-      }
-      serial_count = 0; //clear buffer
-    }
-    else
-    {
-      if(serial_char == ';') comment_mode = true;
-      if(!comment_mode) cmdbuffer[bufindw][serial_count++] = serial_char;
-    }
-  }
   #ifdef SDSUPPORT
-  if(!card.sdprinting || serial_count!=0){
+  if(!card.sdprinting) {
     return;
   }
   if (card.pause)
   {
-
     return;
   }
   static uint32_t endOfLineFilePosition = 0;
+  // Number of characters read for current command
+  static int sd_count = 0;
+  // Set if we are reading a comment line
+  static bool sd_comment_mode = false;
+
   while( !card.eof()  && buflen < BUFSIZE) {
     int16_t n=card.get();
     if (card.errorCode())
@@ -659,26 +615,24 @@ void get_command()
         if (!card.sdInserted)
         {
             card.release();
-            serial_count = 0;
+            sd_count = 0;
             return;
         }
 
         //On an error, reset the error, reset the file position and try again.
         card.clearError();
-        serial_count = 0;
         //Screw it, if we are near the end of a file with an error, act if the file is finished. Hopefully preventing the hang at the end.
         if (endOfLineFilePosition > card.getFileSize() - 512)
             card.sdprinting = false;
         else
-            card.setIndex(endOfLineFilePosition);
+            card.setReadFilePos(endOfLineFilePosition);
         return;
     }
 
-    serial_char = (char)n;
-    if(serial_char == '\n' ||
-       serial_char == '\r' ||
-       (serial_char == ':' && comment_mode == false) ||
-       serial_count >= (MAX_CMD_SIZE - 1)||n==-1)
+    if((char)n == '\n' ||
+       (char)n == '\r' ||
+       ((char)n == ':' && sd_comment_mode == false) ||
+       sd_count >= (MAX_CMD_SIZE - 1)||n==-1)
     {
       if(card.eof() || n==-1){
         SERIAL_PROTOCOLLNPGM(MSG_FILE_PRINTED);
@@ -696,30 +650,180 @@ void get_command()
         card.checkautostart(true);
 
       }
-      if(!serial_count)
+      if(!sd_count)
       {
-        comment_mode = false; //for new command
+        sd_comment_mode = false; //for new command
         return; //if empty line
       }
-      cmdbuffer[bufindw][serial_count] = 0; //terminate string
-//      if(!comment_mode){
+      cmdbuffer[bufindw][sd_count] = 0; //terminate string
+//      if(!sd_comment_mode){
         fromsd[bufindw] = true;
         buflen += 1;
         bufindw = (bufindw + 1)%BUFSIZE;
 //      }
-      comment_mode = false; //for new command
-      serial_count = 0; //clear buffer
-      endOfLineFilePosition = card.getFilePos();
+      sd_comment_mode = false; //for new command
+      sd_count = 0; //clear buffer
+      endOfLineFilePosition = card.getReadFilePos();
     }
     else
     {
+      if((char)n == ';') sd_comment_mode = true;
+      if(!sd_comment_mode) cmdbuffer[bufindw][sd_count++] = (char)n;
+    }
+  }
+  #endif //SDSUPPORT
+}
+
+char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
+{
+
+  static char serial_char;
+  static boolean comment_mode = false;
+  static long gcode_N;
+
+  char * buffer = usbCommand->buffer;
+
+  while( MYSERIAL.available() > 0 ) {
+
+    serial_char = MYSERIAL.read();
+
+    if(serial_char == '\n' ||
+       serial_char == '\r' ||
+       (serial_char == ':' && comment_mode == false) ||
+       usbCommand->serial_count >= (MAX_CMD_SIZE - 1) )
+    {
+      //
+      // Zeile abgeschlossen
+      //
+      if(!usbCommand->serial_count) { //if empty line
+        comment_mode = false; //for new command
+        return NULL;
+      }
+
+      buffer[usbCommand->serial_count] = 0; //terminate string
+
+      #ifdef SDSUPPORT
+      //
+      // Mod ERRI: store comments also if saving to sdcard. This is for 'UltiGCode' comments.
+      //
+      if (!comment_mode || cardSaving)
+      #else
+      if (!comment_mode)
+      #endif
+      {
+
+        if(strchr(buffer, 'N') != NULL)
+        {
+          strchr_pointer = strchr(buffer, 'N');
+          gcode_N = (strtol(&buffer[strchr_pointer - buffer + 1], NULL, 10));
+          if(gcode_N != gcode_LastN+1 && (strstr_P(buffer, PSTR("M110")) == NULL) ) {
+            SERIAL_ERROR_START;
+            SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
+            SERIAL_ERRORLN(gcode_LastN);
+            //Serial.println(gcode_N);
+            FlushSerialRequestResend();
+            usbCommand->serial_count = 0;
+            return NULL;
+          }
+
+          if(strchr(buffer, '*') != NULL)
+          {
+            byte checksum = 0;
+            byte count = 0;
+            while(buffer[count] != '*') checksum = checksum^buffer[count++];
+            strchr_pointer = strchr(buffer, '*');
+
+            if( (int)(strtod(&buffer[strchr_pointer - buffer + 1], NULL)) != checksum) {
+              SERIAL_ERROR_START;
+              SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
+              SERIAL_ERRORLN(gcode_LastN);
+              FlushSerialRequestResend();
+              usbCommand->serial_count = 0;
+              return NULL;
+            }
+            //if no errors, continue parsing
+          }
+          else
+          {
+            SERIAL_ERROR_START;
+            SERIAL_ERRORPGM(MSG_ERR_NO_CHECKSUM);
+            SERIAL_ERRORLN(gcode_LastN);
+            FlushSerialRequestResend();
+            usbCommand->serial_count = 0;
+            return NULL;
+          }
+
+          gcode_LastN = gcode_N;
+          //if no errors, continue parsing
+        }
+        else  // if we don't receive 'N' but still see '*'
+        {
+          if((strchr(buffer, '*') != NULL))
+          {
+            SERIAL_ERROR_START;
+            SERIAL_ERRORPGM(MSG_ERR_NO_LINENUMBER_WITH_CHECKSUM);
+            SERIAL_ERRORLN(gcode_LastN);
+            usbCommand->serial_count = 0;
+            return NULL;
+          }
+        }
+        if((strchr(buffer, 'G') != NULL)){
+          strchr_pointer = strchr(buffer, 'G');
+          switch((int)((strtod(&buffer[strchr_pointer - buffer + 1], NULL)))){
+          case 0:
+          case 1:
+          case 2:
+          case 3:
+            if(Stopped == false) { // If printer is stopped by an error the G[0-3] codes are ignored.
+              if(cardSaving)
+                break;
+              SERIAL_PROTOCOLLNPGM(MSG_OK);
+            }
+            else {
+              SERIAL_ERRORLNPGM(MSG_ERR_STOPPED);
+              LCD_MESSAGEPGM(MSG_STOPPED);
+            }
+            break;
+          default:
+            break;
+          }
+        }
+
+#ifdef ENABLE_ULTILCD2
+        if (! cardSaving) {
+          strchr_pointer = strchr(buffer, 'M');
+          if (strtol(&buffer[strchr_pointer - buffer + 1], NULL, 10) != 105)
+              lastSerialCommandTime = millis();
+        }
+#endif
+      }
+
+      comment_mode = false; //for new command
+      usbCommand->serial_count = 0; //clear buffer
+      return buffer;
+    }
+    else
+    {
+      //
+      // Innerhalb einer zeile
+      //
       if(serial_char == ';') comment_mode = true;
-      if(!comment_mode) cmdbuffer[bufindw][serial_count++] = serial_char;
+      #ifdef SDSUPPORT
+      //
+      // Mod ERRI: store comments also if saving to sdcard. This is for 'UltiGCode' comments.
+      //
+      if (!comment_mode || cardSaving)
+      #else
+      if (!comment_mode)
+      #endif
+      {
+        buffer[usbCommand->serial_count++] = serial_char;
+      }
     }
   }
 
-  #endif //SDSUPPORT
-
+  // No (more) characters to read
+  return NULL;
 }
 
 
@@ -1249,7 +1353,7 @@ void process_commands()
       break;
     case 26: //M26 - Set SD index
       if(card.isOk() && code_seen('S')) {
-        card.setIndex(code_value_long());
+        card.setReadFilePos(code_value_long());
       }
       break;
     case 27: //M27 - Get SD status
@@ -1257,12 +1361,15 @@ void process_commands()
       break;
     case 28: //M28 - Start SD write
       starpos = (strchr(strchr_pointer + 4,'*'));
-      if(starpos != NULL){
-        char* npos = strchr(cmdbuffer[bufindr], 'N');
-        strchr_pointer = strchr(npos,' ') + 1;
-        *(starpos-1) = '\0';
-      }
-      card.openFile(strchr_pointer+4,false);
+      if(starpos != NULL)
+        *starpos = '\0';
+
+      starpos = strchr(strchr_pointer,' ');
+      if (starpos)
+        card.openFile(strupr(starpos+1), false);
+      else
+        card.openFile(strupr(strchr_pointer),false);
+
       break;
     case 29: //M29 - Stop SD write
       //processed in write to file routine above
@@ -1414,10 +1521,11 @@ void process_commands()
         /* continue to loop until we have reached the target temp
           _and_ until TEMP_RESIDENCY_TIME hasn't passed since we reached it */
         while((residencyStart == -1) ||
-              (residencyStart >= 0 && (((unsigned int) (millis() - residencyStart)) < (TEMP_RESIDENCY_TIME * 1000UL))) ) {
+              (residencyStart >= 0 && (((unsigned int) (millis() - residencyStart)) < (TEMP_RESIDENCY_TIME * 1000UL))) )
       #else
-        while ( target_direction ? (isHeatingHotend(tmp_extruder)) : (isCoolingHotend(tmp_extruder)&&(CooldownNoWait==false)) ) {
+        while ( target_direction ? (isHeatingHotend(tmp_extruder)) : (isCoolingHotend(tmp_extruder)&&(CooldownNoWait==false)) )
       #endif //TEMP_RESIDENCY_TIME
+        {
           if( (millis() - codenum) > 1000UL )
           { //Print Temp Reading and remaining time every 1 second while heating up/cooling down
             SERIAL_PROTOCOLPGM("T:");
@@ -2248,6 +2356,17 @@ void process_commands()
       }
     }
     break;
+    case 623: //MSelect SD file (M623 filename.g) for ultimaker2 print, print is started by UM2 gui software.
+      starpos = (strchr(strchr_pointer + 4,'*'));
+      if(starpos != NULL)
+        *starpos = '\0';
+
+      starpos = strchr(strchr_pointer,' ');
+      if (starpos)
+        strncpy(fnAutoPrint, strupr(starpos+1), 13);
+      else
+        strncpy(fnAutoPrint, strupr(strchr_pointer), 13);
+      break;
     #endif//ENABLE_ULTILCD2
 
     case 907: // M907 Set digital trimpot motor current using axis codes.

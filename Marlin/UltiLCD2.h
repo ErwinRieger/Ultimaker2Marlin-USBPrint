@@ -1,3 +1,7 @@
+/*
+    Copyright (C) 2014 Erwin Rieger for UltiGCode USB store and
+    print modifications.
+*/
 #ifndef ULTI_LCD2_H
 #define ULTI_LCD2_H
 
@@ -26,6 +30,10 @@ extern uint8_t led_mode;
 
 void lcd_menu_main();
 
+// Print start over serial/usb
+// Filename in 8.3 format, written by Marlin_main.cpp:process_commands(), serial
+// command 'M623'.
+extern char fnAutoPrint[13];
 #endif
 
 #endif//ULTI_LCD2_H
