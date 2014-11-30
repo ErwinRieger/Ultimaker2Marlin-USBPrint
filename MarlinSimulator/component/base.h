@@ -5,14 +5,14 @@
 #include <vector>
 
 class simBaseComponent;
-extern std::vector<simBaseComponent*> simComponentList;
+extern std::vector<simBaseComponent*> &simComponentList();
 
 class simBaseComponent
 {
 public:
-    simBaseComponent() : drawPosX(-1), drawPosY(-1) {simComponentList.push_back(this);}
+    simBaseComponent() : drawPosX(-1), drawPosY(-1) {simComponentList().push_back(this);}
     virtual ~simBaseComponent() {}
-    
+
     virtual void tick() {}//Called about every ms
     void doDraw() { if (drawPosX > -1) draw(drawPosX, drawPosY); }
     virtual void draw(int x, int y) {}//Called every screen draw (~25ms)

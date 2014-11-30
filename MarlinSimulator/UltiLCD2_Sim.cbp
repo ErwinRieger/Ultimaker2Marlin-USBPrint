@@ -31,6 +31,7 @@
 		</Build>
 		<Compiler>
 			<Add option="-Wall" />
+			<Add option="-fpermissive" />
 			<Add option="-D__AVR_ATmega2560__=1" />
 			<Add option="-DARDUINO=100" />
 			<Add option="-DF_CPU=16000000" />

@@ -4,7 +4,13 @@
 #define DRAW_SCALE 3
 
 extern SDL_Surface *screen;
-std::vector<simBaseComponent*> simComponentList;
+// std::vector<simBaseComponent*> simComponentList;
+
+std::vector<simBaseComponent*> &simComponentList() {
+
+    static std::vector<simBaseComponent*> _simComponentList;
+    return _simComponentList;
+}
 
 static const uint8_t lcd_font[] = {
     // font data

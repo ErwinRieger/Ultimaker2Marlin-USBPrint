@@ -1,4 +1,5 @@
 #include <avr/io.h>
+#include <string.h>
 
 #include "display_SSD1309.h"
 
@@ -6,6 +7,7 @@ displaySDD1309Sim::displaySDD1309Sim(i2cSim* i2c, int id)
 {
     i2c->registerDevice(id, DELEGATE(i2cMessageDelegate, displaySDD1309Sim, *this, processMessage));
     lcd_data_pos = 0;
+    memset(lcd_data, 0, sizeof(lcd_data));
 }
 
 displaySDD1309Sim::~displaySDD1309Sim()

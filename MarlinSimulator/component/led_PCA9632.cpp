@@ -5,6 +5,7 @@
 ledPCA9632Sim::ledPCA9632Sim(i2cSim* i2c, int id)
 {
     i2c->registerDevice(id, DELEGATE(i2cMessageDelegate, ledPCA9632Sim, *this, processMessage));
+    ledout = 0;
 }
 
 ledPCA9632Sim::~ledPCA9632Sim()

@@ -21,6 +21,24 @@
 
 #include "WString.h"
 
+// no itoa/ltoa under linux?
+#include "assert.h"
+void itoa(int value, const char *buf, unsigned char base) {
+    assert(0);
+}
+
+void ltoa(long value, const char *buf, unsigned char base) {
+    assert(0);
+}
+
+char *strupr(const char *s) {
+    char *r = (char *) malloc (strlen (s) + 1);
+    char *res = r;
+    while (*s)
+        *r++ = toupper (*s++);
+    return res;
+}
+
 
 /*********************************************/
 /*  Constructors                             */

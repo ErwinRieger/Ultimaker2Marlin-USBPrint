@@ -12,6 +12,7 @@
 #include "../../component/delegate.h"
 
 typedef delegate<uint8_t, uint8_t&> registerDelegate;
+typedef rdelegate<uint8_t, uint8_t&> registerRDelegate;
 typedef void (*sim_ms_callback_t)();
 
 void sim_check_interrupts();
@@ -22,14 +23,17 @@ class AVRRegistor
 private:
     uint8_t value;
     registerDelegate callback;
+    registerRDelegate readCallback;
 public:
-    AVRRegistor() : value(0), callback() {}
+    AVRRegistor() : value(0), callback(), readCallback() {}
     ~AVRRegistor() {}
     
     void setCallback(registerDelegate callback) { this->callback = callback; }
+    void setReadCallback(registerRDelegate callback) { this->readCallback = callback; }
     void forceValue(uint8_t value) { this->value = value; }
     
-    operator uint8_t() const { return value; }
+    // operator uint8_t() const;
+    operator uint8_t();
     AVRRegistor& operator = (const uint32_t v);
     AVRRegistor& operator |= (const uint32_t n) { *this = (value | n); return *this; }
     AVRRegistor& operator &= (const uint32_t n) { *this = (value & n); return *this; }
@@ -37,7 +41,8 @@ public:
     //volatile uint8_t* operator & () __attribute__((__deprecated__)) { return &value; }
 };
 #define __REG_MAP_SIZE 0x200
-extern AVRRegistor __reg_map[__REG_MAP_SIZE];
+// extern AVRRegistor __reg_map[__REG_MAP_SIZE];
+AVRRegistor *getRegMap();
 
 class AVRRegistor16
 {
@@ -47,13 +52,13 @@ public:
     AVRRegistor16(int index) : index(index) {}
     ~AVRRegistor16() {}
     
-    AVRRegistor16& operator = (const uint32_t v) { __reg_map[index] = v & 0xFF; __reg_map[index+1] = (v >> 8) & 0xFF; return *this; }
-    operator uint16_t() const { return uint16_t(__reg_map[index]) | (uint16_t(__reg_map[index+1])<<8); /*TODO*/}
+    AVRRegistor16& operator = (const uint32_t v) { getRegMap()[index] = v & 0xFF; getRegMap()[index+1] = (v >> 8) & 0xFF; return *this; }
+    operator uint16_t() const { return uint16_t(getRegMap()[index]) | (uint16_t(getRegMap()[index+1])<<8); /*TODO*/}
 };
 
-#define _SFR_MEM8(__n) (__reg_map[(__n)])
+#define _SFR_MEM8(__n) (getRegMap()[(__n)])
 #define _SFR_MEM16(__n) (AVRRegistor16(__n))
-#define _SFR_IO8(__n) (__reg_map[((__n) + 0x20)])
+#define _SFR_IO8(__n) (getRegMap()[((__n) + 0x20)])
 #define _VECTOR(__n) __vector_ ## __n
 #define _SFR_BYTE(__n) __n
 

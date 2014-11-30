@@ -124,9 +124,9 @@ void loop(void);
 
 // On the ATmega1280, the addresses of some of the port registers are
 // greater than 255, so we can't store them in uint8_t's.
-extern const AVRRegistor* PROGMEM port_to_mode_PGM[];
-extern const AVRRegistor* PROGMEM port_to_input_PGM[];
-extern const AVRRegistor* PROGMEM port_to_output_PGM[];
+extern const AVRRegistor* PROGMEM port_to_mode_PGM(int index);
+extern const AVRRegistor* PROGMEM port_to_input_PGM(int index);
+extern const AVRRegistor* PROGMEM port_to_output_PGM(int index);
 
 extern const uint8_t PROGMEM digital_pin_to_port_PGM[];
 // extern const uint8_t PROGMEM digital_pin_to_bit_PGM[];
@@ -142,9 +142,9 @@ extern const uint8_t PROGMEM digital_pin_to_timer_PGM[];
 #define digitalPinToBitMask(P) ( pgm_read_byte( digital_pin_to_bit_mask_PGM + (P) ) )
 #define digitalPinToTimer(P) ( pgm_read_byte( digital_pin_to_timer_PGM + (P) ) )
 #define analogInPinToBit(P) (P)
-#define portOutputRegister(P) ( (AVRRegistor *)( port_to_output_PGM[P]))
-#define portInputRegister(P) ( (AVRRegistor *)( port_to_input_PGM[P]))
-#define portModeRegister(P) ( (AVRRegistor *)( port_to_mode_PGM[P]))
+#define portOutputRegister(P) ( (AVRRegistor *)( port_to_output_PGM(P)))
+#define portInputRegister(P) ( (AVRRegistor *)( port_to_input_PGM(P)))
+#define portModeRegister(P) ( (AVRRegistor *)( port_to_mode_PGM(P)))
 
 #define NOT_A_PIN 0
 #define NOT_A_PORT 0

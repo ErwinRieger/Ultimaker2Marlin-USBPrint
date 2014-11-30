@@ -85,53 +85,66 @@ static const uint8_t A15 = 69;
 
 #ifdef ARDUINO_MAIN
 
-const AVRRegistor* PROGMEM port_to_mode_PGM[] = {
-	NOT_A_PORT,
-	&DDRA,
-	&DDRB,
-	&DDRC,
-	&DDRD,
-	&DDRE,
-	&DDRF,
-	&DDRG,
-	&DDRH,
-	NOT_A_PORT,
-	&DDRJ,
-	&DDRK,
-	&DDRL,
-};
+const AVRRegistor* PROGMEM port_to_mode_PGM(int index) {
 
-const AVRRegistor* PROGMEM port_to_output_PGM[] = {
-	NOT_A_PORT,
-	&PORTA,
-	&PORTB,
-	&PORTC,
-	&PORTD,
-	&PORTE,
-	&PORTF,
-	&PORTG,
-	&PORTH,
-	NOT_A_PORT,
-	&PORTJ,
-	&PORTK,
-	&PORTL,
-};
+    static AVRRegistor* PROGMEM _port_to_mode_PGM[] = {
+	    NOT_A_PORT,
+	    &DDRA,
+	    &DDRB,
+	    &DDRC,
+	    &DDRD,
+	    &DDRE,
+	    &DDRF,
+	    &DDRG,
+	    &DDRH,
+	    NOT_A_PORT,
+	    &DDRJ,
+	    &DDRK,
+	    &DDRL,
+    };
+    return _port_to_mode_PGM[index];
+}
 
-const AVRRegistor* PROGMEM port_to_input_PGM[] = {
-	NOT_A_PIN,
-	&PINA,
-	&PINB,
-	&PINC,
-	&PIND,
-	&PINE,
-	&PINF,
-	&PING,
-	&PINH,
-	NOT_A_PIN,
-	&PINJ,
-	&PINK,
-	&PINL,
-};
+const AVRRegistor* PROGMEM port_to_output_PGM(int index) {
+
+    static AVRRegistor* PROGMEM _port_to_output_PGM[] = {
+	    NOT_A_PORT,
+	    &PORTA,
+	    &PORTB,
+	    &PORTC,
+	    &PORTD,
+	    &PORTE,
+	    &PORTF,
+	    &PORTG,
+	    &PORTH,
+	    NOT_A_PORT,
+	    &PORTJ,
+	    &PORTK,
+	    &PORTL,
+    };
+    return _port_to_output_PGM[index];
+}
+
+const AVRRegistor* PROGMEM port_to_input_PGM(int index) {
+
+    static const AVRRegistor* PROGMEM _port_to_input_PGM[] = {
+	    NOT_A_PIN,
+	    &PINA,
+	    &PINB,
+	    &PINC,
+	    &PIND,
+	    &PINE,
+	    &PINF,
+	    &PING,
+	    &PINH,
+	    NOT_A_PIN,
+	    &PINJ,
+	    &PINK,
+	    &PINL,
+    };
+
+    return _port_to_input_PGM[index];
+}
 
 const uint8_t PROGMEM digital_pin_to_port_PGM[] = {
 	// PORTLIST		

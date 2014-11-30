@@ -2,12 +2,18 @@
 #include <avr/interrupt.h>
 #include <stdio.h>
 #include <SDL/SDL.h>
+#include <assert.h>
 
-#include "../../Marlin/configuration.h"
+#include "../../Marlin/Configuration.h"
 #include "../../Marlin/pins.h"
 #include "../../Marlin/fastio.h"
 
-AVRRegistor __reg_map[__REG_MAP_SIZE];
+AVRRegistor * getRegMap() {
+    // static AVRRegistor __reg_map[__REG_MAP_SIZE];
+    static AVRRegistor __reg_map[__REG_MAP_SIZE];
+    return __reg_map;
+}
+
 uint8_t __eeprom__storage[4096];
 sim_ms_callback_t ms_callback;
 
@@ -19,6 +25,7 @@ extern void TWI_vect();
 extern void TIMER0_OVF_vect();
 extern void TIMER0_COMPB_vect();
 extern void TIMER1_COMPA_vect();
+extern void USART0_RX_vect();
 
 unsigned int prevTicks = SDL_GetTicks();
 unsigned int twiIntStart = 0;
@@ -31,7 +38,7 @@ void sim_check_interrupts()
     unsigned int ticks = SDL_GetTicks();
     int tickDiff = ticks - prevTicks;
     prevTicks = ticks;
-    
+
     if (!(SREG & _BV(SREG_I)))
         return;
 
@@ -53,13 +60,13 @@ void sim_check_interrupts()
         twiIntStart = 0;
     }
 #endif
-    
+
     //if (tickDiff > 1)
     //    printf("Ticks slow! %i\n", tickDiff);
     if (tickDiff > 0)
     {
         ms_callback();
-    
+
         cli();
         for(int n=0;n<tickDiff;n++)
         {
@@ -68,7 +75,7 @@ void sim_check_interrupts()
             if (TIMSK0 & _BV(TOIE0))
                 TIMER0_OVF_vect();
         }
-        
+
         //Timer1 runs at 16Mhz / 8 ticks per second.
         unsigned int waveformMode = ((TCCR1B & (_BV(WGM13) | _BV(WGM12))) >> 1) | (TCCR1A & (_BV(WGM11) | _BV(WGM10)));
         unsigned int clockSource = TCCR1B & (_BV(CS12) | _BV(CS11) | _BV(CS10));
@@ -86,7 +93,7 @@ void sim_check_interrupts()
         case 7: tickCount = 0; break;
         }
         tickCount *= 4;//For some reason the stepper speed is to slow, so cheat the timer routine.
-        
+
         if (tickCount > 0 && OCR1A > 0)
         {
             ticks += tickCount;
@@ -98,11 +105,35 @@ void sim_check_interrupts()
             }
             TCNT1 = ticks;
         }
+
+        uint8_t ucsr0a = UCSR0A;
+
+        // Check for serial rx interrupt
+        if ((UCSR0A & _BV(RXCIE0)) && (UCSR0A & _BV(RXC0))) {
+            printf("rx int enabled\n");
+            USART0_RX_vect();
+        }
+
         _sei();
     }
 }
 
 extern void sim_setup_main();
+
+AVRRegistor::operator uint8_t() /* const */ { 
+
+    // uint8_t n = value;
+
+    if (!ms_callback) sim_setup_main();
+
+    uint8_t n = readCallback(value);
+    
+    // value = n;
+
+    // sim_check_interrupts();
+    // return n;
+    return n;
+}
 
 //Assignment opperator called on every register write.
 AVRRegistor& AVRRegistor::operator = (const uint32_t v)
@@ -124,6 +155,7 @@ void sim_setup(sim_ms_callback_t callback)
         fclose(f);
     }
     ms_callback = callback;
-        
+
     UCSR0A = 0;
+    // UCSR0A = _BV(RXC0);
 }

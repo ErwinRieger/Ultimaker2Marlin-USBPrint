@@ -2,7 +2,7 @@
 
 #include "i2c.h"
 
-i2cSim::i2cSim()
+i2cSim::i2cSim(): i2cMessagePos(0)
 {
     TWCR.setCallback(DELEGATE(registerDelegate, i2cSim, *this, I2C_TWCR_callback));
 }

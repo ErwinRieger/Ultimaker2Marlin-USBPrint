@@ -24,7 +24,8 @@ extern int8_t lcd_lib_encoder_pos_interrupt;
 extern int8_t encoderDiff;
 extern uint8_t __eeprom__storage[4096];
 
-bool cardInserted = true;
+// bool cardInserted = true;
+bool cardInserted = false;
 int stoppedValue;
 
 void setupGui()
@@ -45,8 +46,8 @@ int key_delay;
 #define SCALE 3
 void guiUpdate()
 {
-    for(unsigned int n=0; n<simComponentList.size(); n++)
-        simComponentList[n]->tick();
+    for(unsigned int n=0; n<simComponentList().size(); n++)
+        simComponentList()[n]->tick();
     
     if (SDL_GetTicks() - lastUpdate < 25)
         return;
@@ -137,8 +138,8 @@ void guiUpdate()
     }
     
     SDL_FillRect(screen, NULL, 0x000000);
-    for(unsigned int n=0; n<simComponentList.size(); n++)
-        simComponentList[n]->doDraw();
+    for(unsigned int n=0; n<simComponentList().size(); n++)
+        simComponentList()[n]->doDraw();
     
     SDL_Rect rect;
     rect.w = 32;
@@ -237,7 +238,8 @@ void sim_setup_main()
     (new heaterSim(HEATER_0_PIN, adc, TEMP_0_PIN))->setDrawPosition(130, 70);
     (new heaterSim(HEATER_1_PIN, adc, TEMP_1_PIN))->setDrawPosition(130, 80);
     (new heaterSim(HEATER_BED_PIN, adc, TEMP_BED_PIN, 0.2))->setDrawPosition(130, 90);
-    new sdcardSimulation("c:/models/", 5000);
+    // new sdcardSimulation("c:/models/", 5000);
+    new sdcardSimulation("/tmp/models/", 5000);
     (new serialSim())->setDrawPosition(150, 0);
 #if defined(ULTIBOARD_V2_CONTROLLER) || defined(ENABLE_ULTILCD2)
     i2cSim* i2c = new i2cSim();
@@ -247,4 +249,6 @@ void sim_setup_main()
 #if defined(ULTIPANEL) && !defined(ULTIBOARD_V2_CONTROLLER)
     (new displayHD44780Sim(arduinoIO, LCD_PINS_RS, LCD_PINS_ENABLE, LCD_PINS_D4, LCD_PINS_D5,LCD_PINS_D6,LCD_PINS_D7))->setDrawPosition(0, 0);
 #endif
+     // Initialize sd card detect signal
+     writeInput(SDCARDDETECT, !cardInserted);
 }

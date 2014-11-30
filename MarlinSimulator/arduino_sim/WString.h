@@ -37,6 +37,8 @@
 class __FlashStringHelper;
 #define F(string_literal) (reinterpret_cast<__FlashStringHelper *>(PSTR(string_literal)))
 
+char *strupr(const char *s);
+
 // An inherited class for holding the result of a concatenation.  These
 // result objects are assumed to be writable by subsequent concatenations.
 class StringSumHelper;
