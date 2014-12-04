@@ -259,9 +259,11 @@ static char usbCmdBuffer[MAX_CMD_SIZE];
 // Structure to store the result of get_command_usb()
 struct UsbCommand {
   // Number of characters read for current command
-  int serial_count;
+  uint8_t serial_count;
   // Poniter to Usb/serial read buffer.
   char *buffer;
+  // Stringlength of command, excluding terminating null
+  uint8_t len;
 };
 
 //static int i = 0;
@@ -526,7 +528,13 @@ void loop()
       {
 
         // SD write.
-        card.write_command(usbCmd);
+        // card.write_command(usbCmd);
+        usbCmd[usbCommand.len] = '\n';
+        usbCmd[usbCommand.len+1] = '\0';
+        if (card.write_string(usbCmd)) {
+          SERIAL_ERROR_START;
+          SERIAL_ERRORLNPGM(MSG_SD_ERR_WRITE_TO_FILE);
+        }
 
         #if 0
         // XXX What is "SD Logging" and why do we process the
@@ -547,7 +555,8 @@ void loop()
       else
       {
         // End SD write.
-        card.closefile();
+        if (card.isFileOpen())
+          card.closefile();
         SERIAL_PROTOCOLLNPGM(MSG_FILE_SAVED);
       }
     }
@@ -677,129 +686,146 @@ void get_command_sd()
 char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
 {
 
-  static char serial_char;
-  static boolean comment_mode = false;
-  static long gcode_N;
+  static long gcode_N = 0;
 
   char * buffer = usbCommand->buffer;
 
   while( MYSERIAL.available() > 0 ) {
 
-    serial_char = MYSERIAL.read();
+    char serial_char = MYSERIAL.read();
 
     if(serial_char == '\n' ||
        serial_char == '\r' ||
-       (serial_char == ':' && comment_mode == false) ||
        usbCommand->serial_count >= (MAX_CMD_SIZE - 1) )
     {
       //
       // Zeile abgeschlossen
       //
-      if(!usbCommand->serial_count) { //if empty line
-        comment_mode = false; //for new command
-        return NULL;
+      buffer[usbCommand->serial_count] = 0; //terminate string
+      usbCommand->len = usbCommand->serial_count;
+      usbCommand->serial_count = 0;
+
+      // Skip empty commands
+      if (buffer[0] == '\0') goto emptyCommand;
+
+      /*
+       * cmd
+       * Nx cmd
+       *
+       * cmd
+       * cmd*C
+       * cmd ; comment
+       * cmd*C ; comment
+       * 
+       * N3 T0*57 ;This is a comment
+       * N4 G92 E0*67
+       * ; So is this
+       * N5 G28*22
+       */
+
+      char *cmdStart = buffer;
+      byte checksum = 0;
+
+      // Check if there is a line-number:
+      if (buffer[0] == 'N') {
+          gcode_N = strtol(buffer + 1, &cmdStart, 10);
+
+          if (*cmdStart != ' ') goto syntaxError;
+
+          cmdStart ++;
+      }
+      else {
+        // Make line number check happy
+        gcode_N = gcode_LastN+1;
       }
 
-      buffer[usbCommand->serial_count] = 0; //terminate string
+      // Check for checksum
+      if((strchr_pointer = strchr(cmdStart, '*')) != NULL) {
+          // Command with checksum, get the checksum:
+          int chksm = strtol(strchr_pointer + 1, NULL, 10);
 
-      #ifdef SDSUPPORT
-      //
-      // Mod ERRI: store comments also if saving to sdcard. This is for 'UltiGCode' comments.
-      //
-      if (!comment_mode || cardSaving)
-      #else
-      if (!comment_mode)
-      #endif
-      {
+          // Cut rest of command including checksum (comment)
+          *strchr_pointer = '\0';
 
-        if(strchr(buffer, 'N') != NULL)
-        {
-          strchr_pointer = strchr(buffer, 'N');
-          gcode_N = (strtol(&buffer[strchr_pointer - buffer + 1], NULL, 10));
-          if(gcode_N != gcode_LastN+1 && (strstr_P(buffer, PSTR("M110")) == NULL) ) {
-            SERIAL_ERROR_START;
-            SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
-            SERIAL_ERRORLN(gcode_LastN);
-            //Serial.println(gcode_N);
-            FlushSerialRequestResend();
-            usbCommand->serial_count = 0;
-            return NULL;
-          }
+          usbCommand->len = strchr_pointer - cmdStart;
 
-          if(strchr(buffer, '*') != NULL)
-          {
-            byte checksum = 0;
-            byte count = 0;
-            while(buffer[count] != '*') checksum = checksum^buffer[count++];
-            strchr_pointer = strchr(buffer, '*');
+          // compute checksum from command
+          char *ptr = buffer;
+          while(*ptr) checksum = checksum ^ *(ptr++);
 
-            if( (int)(strtod(&buffer[strchr_pointer - buffer + 1], NULL)) != checksum) {
+          if (chksm != checksum) {
               SERIAL_ERROR_START;
               SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
               SERIAL_ERRORLN(gcode_LastN);
               FlushSerialRequestResend();
-              usbCommand->serial_count = 0;
               return NULL;
             }
-            //if no errors, continue parsing
-          }
-          else
-          {
-            SERIAL_ERROR_START;
-            SERIAL_ERRORPGM(MSG_ERR_NO_CHECKSUM);
-            SERIAL_ERRORLN(gcode_LastN);
-            FlushSerialRequestResend();
-            usbCommand->serial_count = 0;
-            return NULL;
-          }
+      }
 
-          gcode_LastN = gcode_N;
-          //if no errors, continue parsing
-        }
-        else  // if we don't receive 'N' but still see '*'
-        {
-          if((strchr(buffer, '*') != NULL))
-          {
-            SERIAL_ERROR_START;
-            SERIAL_ERRORPGM(MSG_ERR_NO_LINENUMBER_WITH_CHECKSUM);
-            SERIAL_ERRORLN(gcode_LastN);
-            usbCommand->serial_count = 0;
-            return NULL;
-          }
-        }
-        if((strchr(buffer, 'G') != NULL)){
-          strchr_pointer = strchr(buffer, 'G');
-          switch((int)((strtod(&buffer[strchr_pointer - buffer + 1], NULL)))){
+      // Shift left, overwrite line number
+      if (cmdStart != buffer) {
+
+        char *ptr = buffer;
+
+        while (*cmdStart != '\0') 
+            *(ptr++) = *(cmdStart++);
+
+        *ptr = '\0';
+        usbCommand->len = ptr - buffer;
+      }
+
+      if(gcode_N != gcode_LastN+1 && (strncmp_P(buffer, PSTR("M110"), 4) != 0) ) {
+
+        SERIAL_ERROR_START;
+        SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
+        SERIAL_ERRORLN(gcode_LastN);
+        FlushSerialRequestResend();
+        return NULL;
+      }
+
+      gcode_LastN = gcode_N;
+
+      // Skip empty commands
+      if (buffer[0] == '\0') goto emptyCommand;
+
+      // Command now without linenumber and checksum, strip comment
+      if((strchr_pointer = strchr(buffer+1, ';')) != NULL) {
+        // strip comment
+        *strchr_pointer = '\0';
+        usbCommand->len = strchr_pointer - buffer;
+      }
+
+      // Skip empty commands
+      if (buffer[0] == '\0') goto emptyCommand;
+
+      if (buffer[0] == ';') { // entire line is a comment
+        if (cardSaving)
+          return buffer;  // Valid command, ultigcode
+        else 
+          goto emptyCommand;
+      }
+
+      if (buffer[0] == 'G') {
+
+        switch ((int)strtod(buffer + 1, NULL)) {
           case 0:
           case 1:
           case 2:
           case 3:
-            if(Stopped == false) { // If printer is stopped by an error the G[0-3] codes are ignored.
-              if(cardSaving)
-                break;
-              SERIAL_PROTOCOLLNPGM(MSG_OK);
-            }
-            else {
+            if(Stopped) { // If printer is stopped by an error the G[0-3] codes are ignored.
               SERIAL_ERRORLNPGM(MSG_ERR_STOPPED);
               LCD_MESSAGEPGM(MSG_STOPPED);
+              return NULL;
             }
-            break;
-          default:
-            break;
-          }
         }
-
-#ifdef ENABLE_ULTILCD2
-        if (! cardSaving) {
-          strchr_pointer = strchr(buffer, 'M');
-          if (strtol(&buffer[strchr_pointer - buffer + 1], NULL, 10) != 105)
-              lastSerialCommandTime = millis();
-        }
-#endif
       }
 
-      comment_mode = false; //for new command
-      usbCommand->serial_count = 0; //clear buffer
+#ifdef ENABLE_ULTILCD2
+      if ((fnAutoPrint[0] == '\0') && (card.getOpenCount() < 2))
+        if ((buffer[0] != 'M') || (buffer[1] != '1') || (buffer[2] != '0') || (buffer[3] != '5'))
+          lastSerialCommandTime = millis();
+#endif
+
       return buffer;
     }
     else
@@ -807,34 +833,32 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
       //
       // Innerhalb einer zeile
       //
-      if(serial_char == ';') comment_mode = true;
-      #ifdef SDSUPPORT
-      //
-      // Mod ERRI: store comments also if saving to sdcard. This is for 'UltiGCode' comments.
-      //
-      if (!comment_mode || cardSaving)
-      #else
-      if (!comment_mode)
-      #endif
-      {
-        buffer[usbCommand->serial_count++] = serial_char;
-      }
+      buffer[usbCommand->serial_count++] = serial_char;
     }
   }
 
   // No (more) characters to read
+  return NULL;
+
+emptyCommand:
+  SERIAL_PROTOCOLLNPGM(MSG_OK);
+  return NULL;
+
+syntaxError:
+  SERIAL_ERROR_START;
+  SERIAL_ERRORLNPGM("Syntax error");
   return NULL;
 }
 
 
 float code_value()
 {
-  return (strtod(&cmdbuffer[bufindr][strchr_pointer - cmdbuffer[bufindr] + 1], NULL));
+  return (strtod(strchr_pointer + 1, NULL));
 }
 
 long code_value_long()
 {
-  return (strtol(&cmdbuffer[bufindr][strchr_pointer - cmdbuffer[bufindr] + 1], NULL, 10));
+  return (strtol(strchr_pointer + 1, NULL, 10));
 }
 
 bool code_seen(char code)
@@ -2440,7 +2464,7 @@ void process_commands()
         uint8_t x = 0, y = 0;
         if (code_seen('X')) x = code_value_long();
         if (code_seen('Y')) y = code_value_long();
-        if (code_seen('S')) lcd_lib_draw_string(x, y, &cmdbuffer[bufindr][strchr_pointer - cmdbuffer[bufindr] + 1]);
+        if (code_seen('S')) lcd_lib_draw_string(x, y, strchr_pointer + 1);
         }
         break;
     case 10002://M10002 - Draw inverted text on LCD, M10002 X0 Y0 SText
@@ -2448,7 +2472,7 @@ void process_commands()
         uint8_t x = 0, y = 0;
         if (code_seen('X')) x = code_value_long();
         if (code_seen('Y')) y = code_value_long();
-        if (code_seen('S')) lcd_lib_clear_string(x, y, &cmdbuffer[bufindr][strchr_pointer - cmdbuffer[bufindr] + 1]);
+        if (code_seen('S')) lcd_lib_clear_string(x, y, strchr_pointer + 1);
         }
         break;
     case 10003://M10003 - Draw square on LCD, M10003 X1 Y1 W10 H10

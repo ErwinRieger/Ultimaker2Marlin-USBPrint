@@ -95,6 +95,7 @@ public:
       insertChangeDelay = 1000 / 25;
     }
   }
+  FORCE_INLINE uint8_t getOpenCount() { return opencount; }
 
 public:
   bool saving;
@@ -125,7 +126,7 @@ private:
   char* diveDirName;
   void lsDive(const char *prepend,SdFile parent);
   // Number of open calls minus number of close calls
-  unsigned char opencount;
+  uint8_t opencount;
 };
 extern CardReader card;
 #define IS_SD_PRINTING (card.sdprinting)

@@ -116,13 +116,7 @@ void lcd_update()
         (currentMenu == lcd_menu_main))
     {
 
-        // if (card.isFileOpen()) {
-            // SERIAL_ECHOLNPGM("WARNING: file is open while autostarting...!");
-        // }
-
         // Prepare for usb-print, wait 10 seconds
-        // serialScreenShown = false;
-
         lastStartCheck = millis();
 
         lcd_change_to_menu(lcd_menu_autoStart);

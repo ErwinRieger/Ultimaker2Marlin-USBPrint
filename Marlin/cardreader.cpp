@@ -37,6 +37,12 @@ CardReader::CardReader()
     autostart_atmillis=millis()+5000;
 
     opencount = 0;
+
+    filename[0] = '\0';
+    longFilename[0] = '\0';
+
+    // Init sdInserted from card detection signal 
+    sdInserted = IS_SD_INSERTED;
 }
 
 char *createFilename(char *buffer,const dir_t &p) //buffer>12characters
@@ -155,6 +161,12 @@ void CardReader::initsd()
   cardOK = false;
   if(root.isOpen())
     root.close();
+
+  if (! sdInserted) {
+    SERIAL_ECHOLNPGM("SD init fail, no card");
+    return;
+  }
+
 #ifdef SDSLOW
   if (!card.init(SPI_HALF_SPEED,SDSS))
 #else
