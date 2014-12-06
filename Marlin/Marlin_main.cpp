@@ -1370,8 +1370,14 @@ void process_commands()
       starttime=millis();
       break;
     case 25: //M25 - Pause SD print
+      ///
+      /// Mod ERRI: cura-generated gcode contains a M25 code at the end, but
+      /// card.printingHasFinished() has closed already the printing file. So
+      /// check here if its open first.
+      ///
       //card.pauseSDPrint();
-      card.closefile();
+      if (card.isFileOpen())
+        card.closefile();
       break;
     case 26: //M26 - Set SD index
       if(card.isOk() && code_seen('S')) {
