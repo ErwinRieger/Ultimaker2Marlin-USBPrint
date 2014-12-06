@@ -513,7 +513,7 @@ void loop()
   bool cardSaving = false;
  
   #ifdef SDSUPPORT
-  cardSaving = card.saving;
+  cardSaving = card.isSaving();
   #endif
 
   if(cardSaving) {
@@ -555,9 +555,7 @@ void loop()
       else
       {
         // End SD write.
-        if (card.isFileOpen())
-          card.closefile();
-        SERIAL_PROTOCOLLNPGM(MSG_FILE_SAVED);
+        card.endSaving();
       }
     }
   }

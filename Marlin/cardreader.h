@@ -96,9 +96,10 @@ public:
     }
   }
   FORCE_INLINE uint8_t getOpenCount() { return opencount; }
+  FORCE_INLINE bool isSaving() { return saving; }
+  void endSaving();
 
 public:
-  bool saving;
   bool logging;
   bool sdprinting;
   bool pause;
@@ -127,6 +128,7 @@ private:
   void lsDive(const char *prepend,SdFile parent);
   // Number of open calls minus number of close calls
   uint8_t opencount;
+  bool saving;
 };
 extern CardReader card;
 #define IS_SD_PRINTING (card.sdprinting)

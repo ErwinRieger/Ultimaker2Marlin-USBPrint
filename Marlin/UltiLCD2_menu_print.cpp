@@ -87,7 +87,7 @@ static void checkPrintFinished()
         abortPrint();
         currentMenu = lcd_menu_print_ready;
         SELECT_MAIN_MENU_ITEM(0);
-    }else if (card.errorCode() || !card.isFileOpen())
+    }else if (card.errorCode() /* || !card.isFileOpen() */) // undo 86b7c9f0bd4ed34c956cdce2d46ae7441fac9cd9
     {
         abortPrint();
         currentMenu = lcd_menu_print_error;

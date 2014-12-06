@@ -459,6 +459,8 @@ void CardReader::getStatus()
     SERIAL_PROTOCOLLN(card.errorCode());
   }
 }
+
+/// Mod ERRI: Note: currently no used
 void CardReader::write_command(char *buf)
 {
   char* begin = buf;
@@ -555,12 +557,18 @@ void CardReader::closefile()
 
   // xxx debug
   char buffer[64], fn[13];
-  file.getFilename(fn), 
+  file.getFilename(fn);
   sprintf_P(buffer, PSTR("closefile(%s), opencount:  %d"), fn, opencount);
   SERIAL_ECHOLN(buffer);
 
   if (! opencount) {
-    saving = false;
+
+    // xxx debug
+    if (! file.isOpen()) {
+        SERIAL_ERRORLNPGM("Warning: opencount>0 but file not open.");
+        return;
+    }
+
     file.close();
   }
 }
@@ -627,7 +635,10 @@ void CardReader::printingHasFinished()
 {
     st_synchronize();
     quickStop();
-    file.close();
+
+    // file.close();
+    closefile();
+
     sdprinting = false;
     pause = false;
     if(SD_FINISHED_STEPPERRELEASE)
@@ -637,4 +648,12 @@ void CardReader::printingHasFinished()
     }
     autotempShutdown();
 }
+
+void CardReader::endSaving() {
+
+    saving = false;
+    closefile();
+    SERIAL_PROTOCOLLNPGM(MSG_FILE_SAVED);
+}
+
 #endif //SDSUPPORT
