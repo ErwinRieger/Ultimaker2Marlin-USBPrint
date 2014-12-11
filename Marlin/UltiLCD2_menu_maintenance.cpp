@@ -22,6 +22,9 @@ static void lcd_menu_maintenance_retraction();
 static void lcd_menu_advanced_version();
 static void lcd_menu_advanced_stats();
 static void lcd_menu_maintenance_motion();
+#if defined(ExtendedStats)
+static void lcd_menu_extended_stats();
+#endif
 static void lcd_menu_advanced_factory_reset();
 
 void lcd_menu_maintenance()
@@ -85,6 +88,10 @@ static char* lcd_advanced_item(uint8_t nr)
         strcpy_P(card.longFilename, PSTR("Runtime stats"));
     else if (nr == 12 + EXTRUDERS * 2)
         strcpy_P(card.longFilename, PSTR("Factory reset"));
+    #if defined(ExtendedStats)
+    else if (nr == 13 + EXTRUDERS * 2)
+        strcpy_P(card.longFilename, PSTR("Extended Stats"));
+    #endif
     else
         strcpy_P(card.longFilename, PSTR("???"));
     return card.longFilename;
@@ -94,9 +101,15 @@ static void lcd_advanced_details(uint8_t nr)
 {
 }
 
+#if defined(ExtendedStats)
+    #define NADVANCEDItems 14
+#else
+    #define NADVANCEDItems 13
+#endif
+
 static void lcd_menu_maintenance_advanced()
 {
-    lcd_scroll_menu(PSTR("ADVANCED"), 13 + EXTRUDERS * 2, lcd_advanced_item, lcd_advanced_details);
+    lcd_scroll_menu(PSTR("ADVANCED"), NADVANCEDItems + EXTRUDERS * 2, lcd_advanced_item, lcd_advanced_details);
     if (lcd_lib_button_pressed)
     {
         if (IS_SELECTED_SCROLL(0))
@@ -158,13 +171,17 @@ static void lcd_menu_maintenance_advanced()
         else if (IS_SELECTED_SCROLL(8 + EXTRUDERS * 2))
             lcd_change_to_menu(lcd_menu_maintenance_retraction, SCROLL_MENU_ITEM_POS(0));
         else if (IS_SELECTED_SCROLL(9 + EXTRUDERS * 2))
-            lcd_change_to_menu(lcd_menu_maintenance_motion, SCROLL_MENU_ITEM_POS(0));
+            lcd_change_to_menu(lcd_menu_extended_stats, SCROLL_MENU_ITEM_POS(0));
         else if (IS_SELECTED_SCROLL(10 + EXTRUDERS * 2))
             lcd_change_to_menu(lcd_menu_advanced_version, SCROLL_MENU_ITEM_POS(0));
         else if (IS_SELECTED_SCROLL(11 + EXTRUDERS * 2))
             lcd_change_to_menu(lcd_menu_advanced_stats, SCROLL_MENU_ITEM_POS(0));
         else if (IS_SELECTED_SCROLL(12 + EXTRUDERS * 2))
             lcd_change_to_menu(lcd_menu_advanced_factory_reset, SCROLL_MENU_ITEM_POS(1));
+        #if defined(ExtendedStats)
+        else if (IS_SELECTED_SCROLL(13 + EXTRUDERS * 2))
+            lcd_change_to_menu(lcd_menu_extended_stats, SCROLL_MENU_ITEM_POS(0));
+        #endif
     }
 }
 
@@ -433,6 +450,43 @@ static void lcd_menu_maintenance_motion()
             LCD_EDIT_SETTING(motor_current_setting[2], "Current E", "mA", 0, 1300);
     }
 }
+
+#if defined(ExtendedStats)
+static char* lcd_extstats_item(uint8_t nr)
+{
+    if (nr == 0)
+        strcpy_P(card.longFilename, PSTR("< RETURN"));
+    else if (nr == 1)
+        strcpy_P(card.longFilename, PSTR("Timer1 ISR delay"));
+    return card.longFilename;
+}
+
+static void lcd_extstats_details(uint8_t nr)
+{
+    char buffer[16];
+    if (nr == 0)
+        return;
+    else if(nr == 1)
+        int_to_string(stepperDelay, buffer, PSTR("%"));
+    lcd_lib_draw_string(5, 53, buffer);
+}
+
+static void lcd_menu_extended_stats()
+{
+    lcd_scroll_menu(PSTR("Extended Stats"), 2, lcd_extstats_item, lcd_extstats_details);
+    if (lcd_lib_button_pressed)
+    {
+        if (IS_SELECTED_SCROLL(0))
+        {
+            lcd_change_to_menu(lcd_menu_maintenance_advanced, SCROLL_MENU_ITEM_POS(7));
+        }
+        else if (IS_SELECTED_SCROLL(1))
+        {
+            stepperDelay = 0;
+        }
+    }
+}
+#endif
 
 static char* lcd_led_item(uint8_t nr)
 {

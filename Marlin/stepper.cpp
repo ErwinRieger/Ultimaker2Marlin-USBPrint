@@ -90,6 +90,10 @@ static bool check_endstops = true;
 volatile long count_position[NUM_AXIS] = { 0, 0, 0, 0};
 volatile signed char count_direction[NUM_AXIS] = { 1, 1, 1, 1};
 
+#if defined(ExtendedStats)
+uint16_t stepperDelay = 0;
+#endif
+
 //===========================================================================
 //=============================functions         ============================
 //===========================================================================
@@ -330,6 +334,14 @@ FORCE_INLINE void trapezoid_generator_reset() {
 // It pops blocks from the block_buffer and executes them by pulsing the stepper pins appropriately.
 ISR(TIMER1_COMPA_vect)
 {
+
+  #if defined(ExtendedStats)
+  unsigned long tcnt1 = (unsigned long)TCNT1 * 100;
+  uint16_t delay = tcnt1 / OCR1A;
+  if (delay > stepperDelay)
+          stepperDelay = delay;
+  #endif
+
   // If there is no current block, attempt to pop one from the buffer
   if (current_block == NULL) {
     // Anything in the buffer?

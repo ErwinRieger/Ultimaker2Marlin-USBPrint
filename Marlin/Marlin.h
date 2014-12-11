@@ -247,4 +247,9 @@ extern uint8_t active_extruder;
   # define ARRAY_BY_EXTRUDERS(v1, v2, v3) { v1 }
 #endif
 
+#define ExtendedStats 1
+#if defined(ExtendedStats)
+extern uint16_t stepperDelay;
+#endif
+
 #endif
