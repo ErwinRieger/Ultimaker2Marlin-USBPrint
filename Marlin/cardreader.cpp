@@ -490,6 +490,11 @@ bool CardReader::write_string(char* buffer)
     return file.writeError;
 }
 
+bool CardReader::write_string(char* buffer, uint16_t nbyte)
+{
+    file.write(buffer, nbyte);
+    return file.writeError;
+}
 
 void CardReader::checkautostart(bool force)
 {

@@ -530,8 +530,7 @@ void loop()
         // SD write.
         // card.write_command(usbCmd);
         usbCmd[usbCommand.len] = '\n';
-        usbCmd[usbCommand.len+1] = '\0';
-        if (card.write_string(usbCmd)) {
+        if (card.write_string(usbCmd, usbCommand.len+1)) {
           SERIAL_ERROR_START;
           SERIAL_ERRORLNPGM(MSG_SD_ERR_WRITE_TO_FILE);
         }
@@ -545,10 +544,8 @@ void loop()
         }
         else
         {
-        #endif
           // Command-cknowledge over serial line.
           SERIAL_PROTOCOLLNPGM(MSG_OK);
-        #if 0
         }
         #endif
       }
@@ -681,6 +678,9 @@ void get_command_sd()
   #endif //SDSUPPORT
 }
 
+// Send ascii-ACK 0x6 for accepted usbserial command.
+#define USBACK  { MYSERIAL.write(0x6); }
+
 char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
 {
 
@@ -755,7 +755,7 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
               SERIAL_ERROR_START;
               SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
               SERIAL_ERRORLN(gcode_LastN);
-              FlushSerialRequestResend();
+              // FlushSerialRequestResend();
               return NULL;
             }
       }
@@ -777,7 +777,7 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
         SERIAL_ERROR_START;
         SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
         SERIAL_ERRORLN(gcode_LastN);
-        FlushSerialRequestResend();
+        // FlushSerialRequestResend();
         return NULL;
       }
 
@@ -797,8 +797,10 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
       if (buffer[0] == '\0') goto emptyCommand;
 
       if (buffer[0] == ';') { // entire line is a comment
-        if (cardSaving)
+        if (cardSaving) {
+          USBACK; // Send ACK
           return buffer;  // Valid command, ultigcode
+        }
         else 
           goto emptyCommand;
       }
@@ -824,6 +826,7 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
           lastSerialCommandTime = millis();
 #endif
 
+      USBACK; // Send ACK
       return buffer;
     }
     else
@@ -839,12 +842,14 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
   return NULL;
 
 emptyCommand:
-  SERIAL_PROTOCOLLNPGM(MSG_OK);
+  // SERIAL_PROTOCOLLNPGM(MSG_OK);
+  USBACK; // Send ACK
   return NULL;
 
 syntaxError:
   SERIAL_ERROR_START;
-  SERIAL_ERRORLNPGM("Syntax error");
+  SERIAL_ERRORPGM("Syntax error, Last Line:");
+  SERIAL_ERRORLN(gcode_LastN);
   return NULL;
 }
 
