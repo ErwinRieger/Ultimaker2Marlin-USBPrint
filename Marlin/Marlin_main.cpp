@@ -264,6 +264,8 @@ struct UsbCommand {
   char *buffer;
   // Stringlength of command, excluding terminating null
   uint8_t len;
+  // Number of characters in packed command
+  uint8_t packed_count;
 };
 
 //static int i = 0;
@@ -296,6 +298,10 @@ uint8_t Stopped = false;
 //===========================================================================
 
 char * get_command_usb(UsbCommand *usbCommand, bool cardSaving);
+/// Get command from usb, plain text version
+char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving);
+/// Get command from usb, packed binary version
+char * get_command_usb_packed(UsbCommand *usbCommand);
 void get_command_sd();
 void process_commands();
 
@@ -505,7 +511,7 @@ void setup()
 void loop()
 {
 
-  static UsbCommand usbCommand = { 0, NULL };
+  static UsbCommand usbCommand = { 0, NULL, 0, 0 };
 
   char *usbCmd;
 
@@ -518,7 +524,7 @@ void loop()
 
   if(cardSaving) {
 
-    // Get command from usb and store command on SD
+    // Get command from usb and store command to the SD card
     usbCommand.buffer = usbCmdBuffer;
     usbCmd = get_command_usb(&usbCommand, cardSaving);
 
@@ -563,6 +569,7 @@ void loop()
     usbCmd = get_command_usb(&usbCommand, cardSaving);
     if (usbCmd) {
 
+        usbCmd[usbCommand.len] = '\0';
         fromsd[bufindw] = false;
         bufindw = (bufindw + 1)%BUFSIZE;
         buflen += 1;
@@ -683,8 +690,41 @@ void get_command_sd()
 
 char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
 {
+    if (usbCommand->serial_count == 0) {
 
-  static long gcode_N = 0;
+        // At the start of a new command, peek first byte and decide if
+        // it's a plain text or a packed binary command:
+        if( MYSERIAL.available() ) {
+            char serial_char = MYSERIAL.read();
+
+            // Store first char
+            usbCommand->buffer[usbCommand->serial_count++] = serial_char;
+
+            if (serial_char < 59)
+                return get_command_usb_packed(usbCommand);
+            else
+                return get_command_usb_unpacked(usbCommand, cardSaving);
+        }
+        else {
+          // Nothing to read
+          return NULL;
+        }
+    }
+    else {
+
+      // Currently reading a command, call the apropriate worker
+      if (usbCommand->packed_count)
+        return get_command_usb_packed(usbCommand);
+      else
+        return get_command_usb_unpacked(usbCommand, cardSaving);
+    }
+
+}
+
+char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
+{
+
+  long gcode_N = 0;
 
   char * buffer = usbCommand->buffer;
 
@@ -853,6 +893,127 @@ syntaxError:
   return NULL;
 }
 
+
+/*
+# 1 byte:            command 0-59
+# 1 byte:            'parameter mask', bits: FXYZES00 (2 unused bytes)
+# 2 byte:            F param (short)
+# 4 byte:            X param (float)
+# 4 byte:            Y param (float)
+# 4 byte:            Z param (float)
+# 4 byte:            E param (float)
+# 2/4 byte:          2 or 4byte (short/int) line counter, am schluss, damit einfach abzuschneiden
+# 1 byte:            checksum
+*/
+
+#define SLENPTR ((uint16_t*)(buffer+usbCommand->packed_count - 4))
+#define CHKSMPTR ((uint8_t*)(buffer+usbCommand->packed_count - 2))
+#define ILENPTR ((uint32_t*)(buffer+usbCommand->packed_count - 6))
+
+char * get_command_usb_packed(UsbCommand *usbCommand) {
+
+    char *buffer = usbCommand->buffer;
+    char serial_char;
+
+    // If we have one char only, the read the second one to determine
+    // the length of the command
+    if (usbCommand->serial_count == 1) {
+
+        if( MYSERIAL.available() ) {
+
+            serial_char = MYSERIAL.read();
+
+            // Store second char
+            usbCommand->buffer[usbCommand->serial_count++] = serial_char;
+
+            usbCommand->packed_count = 3;  // command + parammask + checksum
+            usbCommand->packed_count += 1; // XXX newline, not needed! adjust SLENPTR, ILENPTR, CHKSMPTR
+
+            // Compute length of command from the `parameter mask`
+            if (serial_char & 0x80)
+              usbCommand->packed_count += 2; // F param
+            if (serial_char & 0x40)
+              usbCommand->packed_count += 4; // X param
+            if (serial_char & 0x20)
+              usbCommand->packed_count += 4; // Y param
+            if (serial_char & 0x10)
+              usbCommand->packed_count += 4; // Z param
+            if (serial_char & 0x08)
+              usbCommand->packed_count += 4; // E param
+            if (serial_char & 0x04)
+              usbCommand->packed_count += 2; // short linenumber
+            else
+              usbCommand->packed_count += 4; // int linenumber
+        }
+        else {
+          usbCommand->packed_count = 1;
+          return NULL;
+        }
+    }
+
+    while (usbCommand->serial_count < usbCommand->packed_count) {
+    
+        if (! MYSERIAL.available())
+            return NULL; // try later
+
+        buffer[usbCommand->serial_count++] = MYSERIAL.read();
+    }
+
+    // Packed command read now
+    usbCommand->serial_count = 0;
+
+    uint8_t checksum = 0;
+    char *ptr = buffer;
+
+    // Check checksum
+    // compute checksum from command
+    while(ptr < (buffer + usbCommand->packed_count - 2))
+        checksum = checksum ^ *(ptr++);
+
+    if (*CHKSMPTR != checksum) {
+
+        usbCommand->packed_count = 0;
+        SERIAL_ERROR_START;
+        SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
+        SERIAL_ERRORLN(gcode_LastN);
+        return NULL;
+    }
+
+    // Check linenumber
+    if (buffer[1] & 0x04) {
+
+        // Short line number
+        if(*SLENPTR != gcode_LastN+1)
+            goto lineError;
+
+        gcode_LastN = *SLENPTR;
+
+        // Cut linenumber and checksum
+        usbCommand->len = usbCommand->packed_count - 4;
+    }
+    else {
+
+        // Int line number
+        if(*ILENPTR != gcode_LastN+1)
+            goto lineError;
+
+        gcode_LastN = *ILENPTR;
+
+        // Cut linenumber and checksum
+        usbCommand->len = usbCommand->packed_count - 6;
+    }
+
+    usbCommand->packed_count = 0;
+    USBACK; // Send ACK
+    return buffer;
+
+lineError:
+    usbCommand->packed_count = 0;
+    SERIAL_ERROR_START;
+    SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
+    SERIAL_ERRORLN(gcode_LastN);
+    return NULL;
+}
 
 float code_value()
 {
