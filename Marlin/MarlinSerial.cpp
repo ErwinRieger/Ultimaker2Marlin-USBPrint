@@ -29,7 +29,7 @@
 #if defined(UBRRH) || defined(UBRR0H) || defined(UBRR1H) || defined(UBRR2H) || defined(UBRR3H)
 
 #if UART_PRESENT(SERIAL_PORT)
-  ring_buffer rx_buffer  =  { { 0 }, 0, 0 };
+  ring_buffer rx_buffer  =  { { 0 }, 0, 0, false };
 #endif
 
 FORCE_INLINE void store_char(unsigned char c)
@@ -53,6 +53,9 @@ FORCE_INLINE void store_char(unsigned char c)
   //SIGNAL(SIG_USART_RECV)
   SIGNAL(M_USARTx_RX_vect)
   {
+
+    // Check error status bits for frame-/overrun- and parity error
+    rx_buffer.error |= M_UCSRxA & 0x1C;
     unsigned char c  =  M_UDRx;
     store_char(c);
   }
@@ -62,7 +65,6 @@ FORCE_INLINE void store_char(unsigned char c)
 
 MarlinSerial::MarlinSerial()
 {
-
 }
 
 // Public Methods //////////////////////////////////////////////////////////////

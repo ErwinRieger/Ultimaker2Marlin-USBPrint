@@ -219,12 +219,14 @@ void CardReader::release()
   sdprinting = false;
   pause = false;
   cardOK = false;
+
+  // XXX ?????
   opencount = 0;
 }
 
 void CardReader::startFileprint()
 {
-  if(cardOK)
+  if(cardOK && isFileOpen() && !eof())
   {
     sdprinting = true;
     pause = false;

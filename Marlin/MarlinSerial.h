@@ -78,6 +78,8 @@ struct ring_buffer
   unsigned char buffer[RX_BUFFER_SIZE];
   int head;
   int tail;
+  // Bitmask of usart error status bits (frame-/overrun- or parity error)
+  uint8_t error;
 };
 
 #if UART_PRESENT(SERIAL_PORT)
@@ -127,12 +129,20 @@ class MarlinSerial //: public Stream
     }
 
 
-    private:
+  private:
     void printNumber(unsigned long, uint8_t);
     void printFloat(double, uint8_t);
 
 
   public:
+
+    // Return bitmask of usart error status bits (frame-/overrun- or parity error)
+    // and reset error status.
+    uint8_t getError() {
+        uint8_t e = rx_buffer.error;
+        rx_buffer.error = false;
+        return e;
+    }
 
     FORCE_INLINE void write(const char *str)
     {

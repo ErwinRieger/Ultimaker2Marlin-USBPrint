@@ -303,6 +303,10 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving);
 /// Get command from usb, packed binary version
 char * get_command_usb_packed(UsbCommand *usbCommand);
 void get_command_sd();
+/// Get command from sd card, plain text version, return the number of bytes read
+uint8_t get_command_sd_unpacked(int16_t c);
+/// Get command from sd card, packed binary version, return the number of bytes read
+uint8_t get_command_sd_packed(int16_t c);
 void process_commands();
 
 void get_arc_coordinates();
@@ -584,9 +588,13 @@ void loop()
   card.checkautostart(false);
   #endif
 
-  if(buflen)
+  if(buflen && !card.pause)
   {
     // Process command from sd or from usb
+    // SERIAL_ECHO("cmd:'");
+    // SERIAL_ECHO(cmdbuffer[bufindr]);
+    // SERIAL_ECHOLN("'");
+
     process_commands();
 
     if (buflen > 0)
@@ -603,49 +611,65 @@ void loop()
   lifetime_stats_tick();
 }
 
-void get_command_sd()
-{
+#define ISPACKEDCOMMAND(c) (c < '\n')
+
+void get_command_sd() {
+
   #ifdef SDSUPPORT
-  if(!card.sdprinting) {
-    return;
-  }
-  if (card.pause)
-  {
-    return;
-  }
-  static uint32_t endOfLineFilePosition = 0;
-  // Number of characters read for current command
-  static int sd_count = 0;
-  // Set if we are reading a comment line
-  static bool sd_comment_mode = false;
 
-  while( !card.eof()  && buflen < BUFSIZE) {
-    int16_t n=card.get();
-    if (card.errorCode())
-    {
-        if (!card.sdInserted)
-        {
-            card.release();
-            sd_count = 0;
-            return;
-        }
-
-        //On an error, reset the error, reset the file position and try again.
-        card.clearError();
-        //Screw it, if we are near the end of a file with an error, act if the file is finished. Hopefully preventing the hang at the end.
-        if (endOfLineFilePosition > card.getFileSize() - 512)
-            card.sdprinting = false;
-        else
-            card.setReadFilePos(endOfLineFilePosition);
+    if(!card.sdprinting) {
         return;
     }
 
-    if((char)n == '\n' ||
-       (char)n == '\r' ||
-       ((char)n == ':' && sd_comment_mode == false) ||
-       sd_count >= (MAX_CMD_SIZE - 1)||n==-1)
-    {
-      if(card.eof() || n==-1){
+    // if (card.pause) {
+        // return;
+    // }
+
+    // At the start of a new command, peek first byte and decide if
+    // it's a plain text or a packed binary command:
+    if ( buflen < BUFSIZE ) {
+
+        int16_t c = card.get();
+        uint8_t sd_count;
+
+        // xxx errorchecking...
+        if (ISPACKEDCOMMAND(c))
+            sd_count = get_command_sd_packed(c);
+        else
+            sd_count = get_command_sd_unpacked(c);
+
+        if (sd_count) {
+
+            fromsd[bufindw] = true;
+            cmdbuffer[bufindw][sd_count] = 0; //terminate string
+            // printf("read '%s'\n", cmdbuffer[bufindw]);
+            buflen += 1;
+            bufindw = (bufindw + 1)%BUFSIZE;
+        }
+    }
+    #endif
+}
+
+uint8_t get_command_sd_unpacked(int16_t n)
+{
+  #ifdef SDSUPPORT
+
+  // Number of characters read for current command
+  int sd_count = 0;
+  // Set if we are reading a comment line
+  bool sd_comment_mode = false;
+
+  while( sd_count < MAX_CMD_SIZE ) {
+
+    // printf("c: '%c'\n", n);
+
+    if (card.errorCode() || (n == -1)) 
+        goto readError;
+
+    if (card.eof()) {
+
+        // printf("get-eof\n");
+
         SERIAL_PROTOCOLLNPGM(MSG_FILE_PRINTED);
         stoptime=millis();
         char time[30];
@@ -659,30 +683,131 @@ void get_command_sd()
         lcd_setstatus(time);
         card.printingHasFinished();
         card.checkautostart(true);
+        return sd_count;
+    }
 
-      }
-      if(!sd_count)
-      {
-        sd_comment_mode = false; //for new command
-        return; //if empty line
-      }
-      cmdbuffer[bufindw][sd_count] = 0; //terminate string
-//      if(!sd_comment_mode){
-        fromsd[bufindw] = true;
-        buflen += 1;
-        bufindw = (bufindw + 1)%BUFSIZE;
-//      }
-      sd_comment_mode = false; //for new command
-      sd_count = 0; //clear buffer
-      endOfLineFilePosition = card.getReadFilePos();
+    if((char)n == '\n' || (char)n == '\r') {
+            // printf("endread\n");
+      return sd_count;
     }
     else
     {
       if((char)n == ';') sd_comment_mode = true;
       if(!sd_comment_mode) cmdbuffer[bufindw][sd_count++] = (char)n;
     }
+
+    n = card.get();
   }
+
+  // Line to long
+  return sd_count;
+
+readError:
+
+    card.printingHasFinished();
+    card.sdprinting = false;
+
+    SERIAL_ERROR_START;
+    SERIAL_ERRORPGM(MSG_SD_ERR_READ_FILE);
+    return 0;
+
   #endif //SDSUPPORT
+}
+
+uint8_t getPackedLen(uint8_t paramFlags) {
+
+    uint8_t len = 3; // command + parammask + checksum
+    len += 1; // XXX newline, not needed! adjust SLENPTR, ILENPTR, CHKSMPTR
+
+    // Compute length of command from the `parameter mask`
+    if (paramFlags & 0x80)
+      len += 2; // F param
+    if (paramFlags & 0x40)
+      len += 4; // X param
+    if (paramFlags & 0x20)
+      len += 4; // Y param
+    if (paramFlags & 0x10)
+      len += 4; // Z param
+    if (paramFlags & 0x08)
+      len += 4; // E param
+    if (paramFlags & 0x04)
+      len += 2; // short linenumber
+    else
+      len += 4; // int linenumber
+
+    return len;
+}
+
+uint8_t get_command_sd_packed(int16_t n) {
+
+    uint8_t sd_count = 0;
+
+    // Store initial char
+    cmdbuffer[bufindw][sd_count++] = (char)n;
+
+    // Get second byte, the paramFlags
+    // xxx in eigene funktion:
+    // xxx n == -1 ist fehler, kein eof...
+    if(card.eof() || n==-1){
+
+        SERIAL_PROTOCOLLNPGM(MSG_FILE_PRINTED);
+        stoptime=millis();
+        char time[30];
+        unsigned long t=(stoptime-starttime)/1000;
+        int hours, minutes;
+        minutes=(t/60)%60;
+        hours=t/60/60;
+        sprintf_P(time, PSTR("%i hours %i minutes"),hours, minutes);
+        SERIAL_ECHO_START;
+        SERIAL_ECHOLN(time);
+        lcd_setstatus(time);
+        card.printingHasFinished();
+        card.checkautostart(true);
+    }
+
+    n=card.get();
+    uint8_t nBytes = getPackedLen((char)n);
+
+    if (n & 0x04) {
+
+        // Short line number
+        nBytes -= 3;
+    }
+    else {
+
+        // Int line number
+        nBytes -= 5;
+    }
+
+    // Store second char
+    cmdbuffer[bufindw][sd_count++] = (char)n;
+
+    while (sd_count < nBytes) {
+
+        // xxx in eigene funktion:
+        if(card.eof() || n==-1){
+
+            SERIAL_PROTOCOLLNPGM(MSG_FILE_PRINTED);
+            stoptime=millis();
+            char time[30];
+            unsigned long t=(stoptime-starttime)/1000;
+            int hours, minutes;
+            minutes=(t/60)%60;
+            hours=t/60/60;
+            sprintf_P(time, PSTR("%i hours %i minutes"),hours, minutes);
+            SERIAL_ECHO_START;
+            SERIAL_ECHOLN(time);
+            lcd_setstatus(time);
+            card.printingHasFinished();
+            card.checkautostart(true);
+        }
+
+        int16_t n=card.get();
+
+        cmdbuffer[bufindw][sd_count++] = (char)n;
+    }
+
+    return sd_count;
 }
 
 // Send ascii-ACK 0x6 for accepted usbserial command.
@@ -690,6 +815,19 @@ void get_command_sd()
 
 char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
 {
+
+    // Check usart status bits, restart on error
+    uint8_t e;
+    if (e = MYSERIAL.getError()) {
+        SERIAL_ERROR_START;
+        SERIAL_ERRORPGM("RX err(");
+        SERIAL_ERROR(e);
+        SERIAL_ERRORPGM(") Last Line:");
+        SERIAL_ERRORLN(gcode_LastN);
+        MYSERIAL.flush();
+        return NULL;
+    }
+
     if (usbCommand->serial_count == 0) {
 
         // At the start of a new command, peek first byte and decide if
@@ -700,7 +838,7 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
             // Store first char
             usbCommand->buffer[usbCommand->serial_count++] = serial_char;
 
-            if (serial_char < 59)
+            if (ISPACKEDCOMMAND(serial_char))
                 return get_command_usb_packed(usbCommand);
             else
                 return get_command_usb_unpacked(usbCommand, cardSaving);
@@ -718,7 +856,6 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
       else
         return get_command_usb_unpacked(usbCommand, cardSaving);
     }
-
 }
 
 char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
@@ -895,7 +1032,7 @@ syntaxError:
 
 
 /*
-# 1 byte:            command 0-59
+# 1 byte:            command 0-9
 # 1 byte:            'parameter mask', bits: FXYZES00 (2 unused bytes)
 # 2 byte:            F param (short)
 # 4 byte:            X param (float)
@@ -926,24 +1063,7 @@ char * get_command_usb_packed(UsbCommand *usbCommand) {
             // Store second char
             usbCommand->buffer[usbCommand->serial_count++] = serial_char;
 
-            usbCommand->packed_count = 3;  // command + parammask + checksum
-            usbCommand->packed_count += 1; // XXX newline, not needed! adjust SLENPTR, ILENPTR, CHKSMPTR
-
-            // Compute length of command from the `parameter mask`
-            if (serial_char & 0x80)
-              usbCommand->packed_count += 2; // F param
-            if (serial_char & 0x40)
-              usbCommand->packed_count += 4; // X param
-            if (serial_char & 0x20)
-              usbCommand->packed_count += 4; // Y param
-            if (serial_char & 0x10)
-              usbCommand->packed_count += 4; // Z param
-            if (serial_char & 0x08)
-              usbCommand->packed_count += 4; // E param
-            if (serial_char & 0x04)
-              usbCommand->packed_count += 2; // short linenumber
-            else
-              usbCommand->packed_count += 4; // int linenumber
+            usbCommand->packed_count = getPackedLen(serial_char);
         }
         else {
           usbCommand->packed_count = 1;
@@ -1159,6 +1279,132 @@ static void homeaxis(int axis) {
     #endif
   }
 }
+
+void get_coordinates()
+{
+    bool seen[4]={false,false,false,false};
+    for(int8_t i=0; i < NUM_AXIS; i++)
+    {
+        if(code_seen(axis_codes[i]))
+        {
+            destination[i] = (float)code_value() + (axis_relative_modes[i] || relative_mode)*current_position[i];
+            seen[i]=true;
+        }
+        else
+        {
+            destination[i] = current_position[i]; //Are these else lines really needed?
+        }
+    }
+    if(code_seen('F'))
+    {
+        next_feedrate = code_value();
+        if(next_feedrate > 0.0) feedrate = next_feedrate;
+    }
+    #ifdef FWRETRACT
+
+    if(autoretract_enabled)
+    {
+        if( !(seen[X_AXIS] || seen[Y_AXIS] || seen[Z_AXIS]) && seen[E_AXIS])
+        {
+            float echange=destination[E_AXIS]-current_position[E_AXIS];
+            if(echange<-MIN_RETRACT) //retract
+            {
+                if(!retracted)
+                {
+                    destination[Z_AXIS]+=retract_zlift; //not sure why chaninging current_position negatively does not work.
+                    //if slicer retracted by echange=-1mm and you want to retract 3mm, corrrectede=-2mm additionally
+                    float correctede=-echange-retract_length;
+                    //to generate the additional steps, not the destination is changed, but inversely the current position
+                    current_position[E_AXIS]+=-correctede;
+                    feedrate=retract_feedrate;
+                    retracted=true;
+                }
+            }
+            else if(echange>MIN_RETRACT) //retract_recover
+            {
+                if(retracted)
+                {
+                    //current_position[Z_AXIS]+=-retract_zlift;
+                    //if slicer retracted_recovered by echange=+1mm and you want to retract_recover 3mm, corrrectede=2mm additionally
+                    float correctede=-echange+1*retract_length+retract_recover_length; //total unretract=retract_length+retract_recover_length[surplus]
+                    current_position[E_AXIS]+=correctede; //to generate the additional steps, not the destination is changed, but inversely the current position
+                    feedrate=retract_recover_feedrate;
+                    retracted=false;
+                }
+            }
+        }
+    }
+    #endif //FWRETRACT
+}
+
+void get_coordinates_packed(char * buffer)
+{
+    bool seen[4]={false,false,false,false};
+
+    int8_t paramMask = buffer[1];
+
+    buffer += 2; // point to first param
+
+    if(paramMask & 0x80) {
+        feedrate = *((uint16_t*)buffer); // skip command and paramMask, read short
+        buffer += 2; // point to next param
+    }
+
+    int8_t mask = 0x40;
+
+    for(int8_t i=0; i < NUM_AXIS; i++)
+    {
+        if(paramMask & mask) {
+
+            destination[i] = *((float*)buffer) + (axis_relative_modes[i] || relative_mode)*current_position[i];
+            buffer += 4; // point to next param
+            seen[i]=true;
+        }
+        else
+        {
+            destination[i] = current_position[i]; //Are these else lines really needed?
+        }
+
+        mask >>= 1;
+    }
+
+    #ifdef FWRETRACT
+
+    if(autoretract_enabled)
+    {
+        if( !(seen[X_AXIS] || seen[Y_AXIS] || seen[Z_AXIS]) && seen[E_AXIS])
+        {
+            float echange=destination[E_AXIS]-current_position[E_AXIS];
+            if(echange<-MIN_RETRACT) //retract
+            {
+                if(!retracted)
+                {
+                    destination[Z_AXIS]+=retract_zlift; //not sure why chaninging current_position negatively does not work.
+                    //if slicer retracted by echange=-1mm and you want to retract 3mm, corrrectede=-2mm additionally
+                    float correctede=-echange-retract_length;
+                    //to generate the additional steps, not the destination is changed, but inversely the current position
+                    current_position[E_AXIS]+=-correctede;
+                    feedrate=retract_feedrate;
+                    retracted=true;
+                }
+            }
+            else if(echange>MIN_RETRACT) //retract_recover
+            {
+                if(retracted)
+                {
+                    //current_position[Z_AXIS]+=-retract_zlift;
+                    //if slicer retracted_recovered by echange=+1mm and you want to retract_recover 3mm, corrrectede=2mm additionally
+                    float correctede=-echange+1*retract_length+retract_recover_length; //total unretract=retract_length+retract_recover_length[surplus]
+                    current_position[E_AXIS]+=correctede; //to generate the additional steps, not the destination is changed, but inversely the current position
+                    feedrate=retract_recover_feedrate;
+                    retracted=false;
+                }
+            }
+        }
+    }
+    #endif //FWRETRACT
+}
+
 #define HOMEAXIS(LETTER) homeaxis(LETTER##_AXIS)
 
 void process_commands()
@@ -1167,7 +1413,21 @@ void process_commands()
   char *starpos = NULL;
 
   printing_state = PRINT_STATE_NORMAL;
-  if(code_seen('G'))
+
+  if (ISPACKEDCOMMAND(cmdbuffer[bufindr][0])) {
+
+    switch(cmdbuffer[bufindr][0]) {
+
+        case 1: // G0 -> G1
+        case 2: // G1
+            if(Stopped == false) {
+                get_coordinates_packed(cmdbuffer[bufindr]); // For X Y Z E F
+                prepare_move();
+                return;
+            }
+        }
+  }
+  else if(code_seen('G'))
   {
     switch((int)code_value())
     {
@@ -1541,9 +1801,9 @@ void process_commands()
       /// card.printingHasFinished() has closed already the printing file. So
       /// check here if its open first.
       ///
-      //card.pauseSDPrint();
-      if (card.isFileOpen())
-        card.closefile();
+      card.pauseSDPrint();
+      // if (card.isFileOpen())
+        // card.closefile();
       break;
     case 26: //M26 - Set SD index
       if(card.isOk() && code_seen('S')) {
@@ -2767,62 +3027,6 @@ void ClearToSend()
     return;
   #endif //SDSUPPORT
   SERIAL_PROTOCOLLNPGM(MSG_OK);
-}
-
-void get_coordinates()
-{
-    bool seen[4]={false,false,false,false};
-    for(int8_t i=0; i < NUM_AXIS; i++)
-    {
-        if(code_seen(axis_codes[i]))
-        {
-            destination[i] = (float)code_value() + (axis_relative_modes[i] || relative_mode)*current_position[i];
-            seen[i]=true;
-        }
-        else
-        {
-            destination[i] = current_position[i]; //Are these else lines really needed?
-        }
-    }
-    if(code_seen('F'))
-    {
-        next_feedrate = code_value();
-        if(next_feedrate > 0.0) feedrate = next_feedrate;
-    }
-    #ifdef FWRETRACT
-    if(autoretract_enabled)
-    {
-        if( !(seen[X_AXIS] || seen[Y_AXIS] || seen[Z_AXIS]) && seen[E_AXIS])
-        {
-            float echange=destination[E_AXIS]-current_position[E_AXIS];
-            if(echange<-MIN_RETRACT) //retract
-            {
-                if(!retracted)
-                {
-                    destination[Z_AXIS]+=retract_zlift; //not sure why chaninging current_position negatively does not work.
-                    //if slicer retracted by echange=-1mm and you want to retract 3mm, corrrectede=-2mm additionally
-                    float correctede=-echange-retract_length;
-                    //to generate the additional steps, not the destination is changed, but inversely the current position
-                    current_position[E_AXIS]+=-correctede;
-                    feedrate=retract_feedrate;
-                    retracted=true;
-                }
-            }
-            else if(echange>MIN_RETRACT) //retract_recover
-            {
-                if(retracted)
-                {
-                    //current_position[Z_AXIS]+=-retract_zlift;
-                    //if slicer retracted_recovered by echange=+1mm and you want to retract_recover 3mm, corrrectede=2mm additionally
-                    float correctede=-echange+1*retract_length+retract_recover_length; //total unretract=retract_length+retract_recover_length[surplus]
-                    current_position[E_AXIS]+=correctede; //to generate the additional steps, not the destination is changed, but inversely the current position
-                    feedrate=retract_recover_feedrate;
-                    retracted=false;
-                }
-            }
-        }
-    }
-    #endif //FWRETRACT
 }
 
 void get_arc_coordinates()
