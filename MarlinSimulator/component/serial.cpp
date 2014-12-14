@@ -65,7 +65,7 @@ uint8_t  serialSim::UART_UCSR0A_read_callback(uint8_t& value)
 
    if (((value & _BV(RXC0)) == 0) && (ptty >= 0) && (read(ptty, &rxChar, 1) == 1)) {
 
-        printf("UART_UCSR0A_read_callback read: %c\n", rxChar);
+        // printf("UART_UCSR0A_read_callback read: %c\n", rxChar);
         value |= _BV(RXC0);
    }
 
@@ -95,7 +95,7 @@ void serialSim::UART_UDR0_callback(uint8_t oldValue, uint8_t& newValue)
 uint8_t  serialSim::UART_UDR0_read_callback(uint8_t& value)
 {
 
-    printf("UART_UDR0_read_callback: %c\n", rxChar);
+    // printf("UART_UDR0_read_callback: %c\n", rxChar);
 
     uint8_t c = rxChar;
 

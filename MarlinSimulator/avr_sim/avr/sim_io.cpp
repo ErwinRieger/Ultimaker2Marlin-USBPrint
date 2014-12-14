@@ -77,7 +77,7 @@ void sim_check_interrupts()
         }
 
         //Timer1 runs at 16Mhz / 8 ticks per second.
-        unsigned int waveformMode = ((TCCR1B & (_BV(WGM13) | _BV(WGM12))) >> 1) | (TCCR1A & (_BV(WGM11) | _BV(WGM10)));
+        // unsigned int waveformMode = ((TCCR1B & (_BV(WGM13) | _BV(WGM12))) >> 1) | (TCCR1A & (_BV(WGM11) | _BV(WGM10)));
         unsigned int clockSource = TCCR1B & (_BV(CS12) | _BV(CS11) | _BV(CS10));
         unsigned int tickCount = F_CPU * tickDiff / 1000;
         unsigned int ticks = TCNT1;
@@ -106,13 +106,15 @@ void sim_check_interrupts()
             TCNT1 = ticks;
         }
 
+        /*
         uint8_t ucsr0a = UCSR0A;
 
         // Check for serial rx interrupt
-        if ((UCSR0A & _BV(RXCIE0)) && (UCSR0A & _BV(RXC0))) {
-            printf("rx int enabled\n");
+        if ((ucsr0a & _BV(RXCIE0)) && (ucsr0a & _BV(RXC0))) {
+            // printf("rx int enabled\n");
             USART0_RX_vect();
         }
+        */
 
         _sei();
     }
@@ -122,16 +124,12 @@ extern void sim_setup_main();
 
 AVRRegistor::operator uint8_t() /* const */ { 
 
-    // uint8_t n = value;
-
-    if (!ms_callback) sim_setup_main();
+    // if (!ms_callback) sim_setup_main();
 
     uint8_t n = readCallback(value);
     
-    // value = n;
-
     // sim_check_interrupts();
-    // return n;
+
     return n;
 }
 
@@ -157,5 +155,4 @@ void sim_setup(sim_ms_callback_t callback)
     ms_callback = callback;
 
     UCSR0A = 0;
-    // UCSR0A = _BV(RXC0);
 }

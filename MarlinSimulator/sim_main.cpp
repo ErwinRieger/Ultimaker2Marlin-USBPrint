@@ -24,8 +24,8 @@ extern int8_t lcd_lib_encoder_pos_interrupt;
 extern int8_t encoderDiff;
 extern uint8_t __eeprom__storage[4096];
 
-// bool cardInserted = true;
-bool cardInserted = false;
+bool cardInserted = true;
+// bool cardInserted = false;
 int stoppedValue;
 
 void setupGui()
