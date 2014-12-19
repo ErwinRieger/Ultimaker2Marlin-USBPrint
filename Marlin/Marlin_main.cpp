@@ -268,6 +268,10 @@ struct UsbCommand {
   uint8_t packed_count;
 };
 
+static UsbCommand usbCommand = { 0, NULL, 0, 0 };
+
+static void manage_inactivity();
+
 //static int i = 0;
 static char *strchr_pointer; // just a pointer to find chars in the cmd string like X, Y, Z, E, etc
 
@@ -515,74 +519,9 @@ void setup()
 void loop()
 {
 
-  static UsbCommand usbCommand = { 0, NULL, 0, 0 };
-
-  char *usbCmd;
-
-  // Set if we are storing to sdcard
-  bool cardSaving = false;
- 
-  #ifdef SDSUPPORT
-  cardSaving = card.isSaving();
-  #endif
-
-  if(cardSaving) {
-
-    // Get command from usb and store command to the SD card
-    usbCommand.buffer = usbCmdBuffer;
-    usbCmd = get_command_usb(&usbCommand, cardSaving);
-
-    if (usbCmd) {
-
-      if(strstr_P(usbCmd, PSTR("M29")) == NULL)
-      {
-
-        // SD write.
-        // card.write_command(usbCmd);
-        usbCmd[usbCommand.len] = '\n';
-        if (card.write_string(usbCmd, usbCommand.len+1)) {
-          SERIAL_ERROR_START;
-          SERIAL_ERRORLNPGM(MSG_SD_ERR_WRITE_TO_FILE);
-        }
-
-        #if 0
-        // XXX What is "SD Logging" and why do we process the
-        // command(s) here?
-        if(card.logging)
-        {
-          process_commands();
-        }
-        else
-        {
-          // Command-cknowledge over serial line.
-          SERIAL_PROTOCOLLNPGM(MSG_OK);
-        }
-        #endif
-      }
-      else
-      {
-        // End SD write.
-        card.endSaving();
-      }
-    }
-  }
-  else {
-
-    // Store command from usb into the command ring buffer for later processing
-    usbCommand.buffer = cmdbuffer[bufindw];
-    usbCmd = get_command_usb(&usbCommand, cardSaving);
-    if (usbCmd) {
-
-        usbCmd[usbCommand.len] = '\0';
-        fromsd[bufindw] = false;
-        bufindw = (bufindw + 1)%BUFSIZE;
-        buflen += 1;
-    }
-  }
-
   // Get command from sdcard and store it into the command ring buffer
-  if((buflen < (BUFSIZE-1)) && (usbCommand.serial_count == 0))
-      get_command_sd();
+  if((buflen < (BUFSIZE-1)) && ((usbCommand.serial_count == 0) || card.isSaving()))
+    get_command_sd();
 
   #ifdef SDSUPPORT
   card.checkautostart(false);
@@ -603,12 +542,15 @@ void loop()
       bufindr = (bufindr + 1)%BUFSIZE;
     }
   }
+
   //check heater every n milliseconds
-  manage_heater();
-  manage_inactivity();
   checkHitEndstops();
-  lcd_update();
-  lifetime_stats_tick();
+  // manage_heater();
+  // manage_inactivity();
+  // lcd_update();
+  // lifetime_stats_tick();
+
+  doIdleTasks();
 }
 
 #define ISPACKEDCOMMAND(c) (c < '\n')
@@ -627,7 +569,7 @@ void get_command_sd() {
 
     // At the start of a new command, peek first byte and decide if
     // it's a plain text or a packed binary command:
-    if ( buflen < BUFSIZE ) {
+    // if ( buflen < BUFSIZE ) {
 
         int16_t c = card.get();
         uint8_t sd_count;
@@ -646,7 +588,7 @@ void get_command_sd() {
             buflen += 1;
             bufindw = (bufindw + 1)%BUFSIZE;
         }
-    }
+    // }
     #endif
 }
 
@@ -933,6 +875,7 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
               SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
               SERIAL_ERRORLN(gcode_LastN);
               // FlushSerialRequestResend();
+              MYSERIAL.flush();
               return NULL;
             }
       }
@@ -955,6 +898,7 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
         SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
         SERIAL_ERRORLN(gcode_LastN);
         // FlushSerialRequestResend();
+        MYSERIAL.flush();
         return NULL;
       }
 
@@ -1027,6 +971,7 @@ syntaxError:
   SERIAL_ERROR_START;
   SERIAL_ERRORPGM("Syntax error, Last Line:");
   SERIAL_ERRORLN(gcode_LastN);
+  MYSERIAL.flush();
   return NULL;
 }
 
@@ -1052,7 +997,12 @@ char * get_command_usb_packed(UsbCommand *usbCommand) {
     char *buffer = usbCommand->buffer;
     char serial_char;
 
-    // If we have one char only, the read the second one to determine
+#ifdef ENABLE_ULTILCD2
+      if ((fnAutoPrint[0] == '\0') && (card.getOpenCount() < 2))
+        lastSerialCommandTime = millis();
+#endif
+
+    // If we have read only one char yet, then read the second one to determine
     // the length of the command
     if (usbCommand->serial_count == 1) {
 
@@ -1096,6 +1046,7 @@ char * get_command_usb_packed(UsbCommand *usbCommand) {
         SERIAL_ERROR_START;
         SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
         SERIAL_ERRORLN(gcode_LastN);
+        MYSERIAL.flush();
         return NULL;
     }
 
@@ -1132,6 +1083,7 @@ lineError:
     SERIAL_ERROR_START;
     SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
     SERIAL_ERRORLN(gcode_LastN);
+    MYSERIAL.flush();
     return NULL;
 }
 
@@ -1463,10 +1415,11 @@ void process_commands()
       previous_millis_cmd = millis();
       printing_state = PRINT_STATE_DWELL;
       while(millis()  < codenum ){
-        manage_heater();
-        manage_inactivity();
-        lcd_update();
-        lifetime_stats_tick();
+        // manage_heater();
+        // manage_inactivity();
+        // lcd_update();
+        // lifetime_stats_tick();
+        doIdleTasks();
       }
       break;
       #ifdef FWRETRACT
@@ -1712,17 +1665,19 @@ void process_commands()
       if (codenum > 0){
         codenum += millis();  // keep track of when we started waiting
         while(millis()  < codenum && !lcd_clicked()){
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-          lifetime_stats_tick();
+          // manage_heater();
+          // manage_inactivity();
+          // lcd_update();
+          // lifetime_stats_tick();
+          doIdleTasks();
         }
       }else{
         while(!lcd_clicked()){
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-          lifetime_stats_tick();
+          // manage_heater();
+          // manage_inactivity();
+          // lcd_update();
+          // lifetime_stats_tick();
+          doIdleTasks();
         }
       }
       LCD_MESSAGEPGM(MSG_RESUMING);
@@ -1744,17 +1699,19 @@ void process_commands()
       if (codenum > 0){
         codenum += millis();  // keep track of when we started waiting
         while(millis()  < codenum && !lcd_lib_button_down){
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-          lifetime_stats_tick();
+          // manage_heater();
+          // manage_inactivity();
+          // lcd_update();
+          // lifetime_stats_tick();
+          doIdleTasks();
         }
       }else{
         while(!lcd_lib_button_down){
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-          lifetime_stats_tick();
+          // manage_heater();
+          // manage_inactivity();
+          // lcd_update();
+          // lifetime_stats_tick();
+          doIdleTasks();
         }
       }
     }
@@ -2002,10 +1959,11 @@ void process_commands()
             #endif
             codenum = millis();
           }
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-          lifetime_stats_tick();
+          // manage_heater();
+          // manage_inactivity();
+          // lcd_update();
+          // lifetime_stats_tick();
+          doIdleTasks();
         #ifdef TEMP_RESIDENCY_TIME
             /* start/restart the TEMP_RESIDENCY_TIME timer whenever we reach target temp for the first time
               or when current temp falls outside the hysteresis after target temp was reached */
@@ -2042,10 +2000,11 @@ void process_commands()
             SERIAL_PROTOCOLLN("");
             codenum = millis();
           }
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-          lifetime_stats_tick();
+          // manage_heater();
+          // manage_inactivity();
+          // lcd_update();
+          // lifetime_stats_tick();
+          doIdleTasks();
         }
         LCD_MESSAGEPGM(MSG_BED_DONE);
         previous_millis_cmd = millis();
@@ -2636,10 +2595,11 @@ void process_commands()
         uint8_t cnt=0;
         while(!lcd_clicked()){
           cnt++;
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-          lifetime_stats_tick();
+          // manage_heater();
+          // manage_inactivity();
+          // lcd_update();
+          // lifetime_stats_tick();
+          doIdleTasks();
           if(cnt==0)
           {
           #if BEEPER > 0
@@ -2723,10 +2683,11 @@ void process_commands()
         disable_e1();
         disable_e2();
         while(card.pause){
-          manage_heater();
-          manage_inactivity();
-          lcd_update();
-          lifetime_stats_tick();
+          // manage_heater();
+          // manage_inactivity();
+          // lcd_update();
+          // lifetime_stats_tick();
+          doIdleTasks();
         }
 
         //return to normal
@@ -3198,6 +3159,80 @@ void controllerFan()
   }
 }
 #endif
+
+void doIdleTasks()
+{
+    //
+    // Handle usb/serial interface
+    //
+    char *usbCmd;
+
+    // Set if we are storing to sdcard
+    bool cardSaving = false;
+ 
+    #ifdef SDSUPPORT
+    cardSaving = card.isSaving();
+    #endif
+
+    if(cardSaving) {
+
+        // Get command from usb and store command to the SD card
+        usbCommand.buffer = usbCmdBuffer;
+        usbCmd = get_command_usb(&usbCommand, cardSaving);
+
+        if (usbCmd) {
+
+        if(strstr_P(usbCmd, PSTR("M29")) == NULL)
+        {
+
+            // SD write.
+            // card.write_command(usbCmd);
+            usbCmd[usbCommand.len] = '\n';
+            if (card.write_string(usbCmd, usbCommand.len+1)) {
+            SERIAL_ERROR_START;
+            SERIAL_ERRORLNPGM(MSG_SD_ERR_WRITE_TO_FILE);
+            }
+
+            #if 0
+            // XXX What is "SD Logging" and why do we process the
+            // command(s) here?
+            if(card.logging)
+            {
+            process_commands();
+            }
+            else
+            {
+            // Command-cknowledge over serial line.
+            SERIAL_PROTOCOLLNPGM(MSG_OK);
+            }
+            #endif
+        }
+        else
+        {
+            // End SD write.
+            card.endSaving();
+        }
+        }
+    }
+    else {
+
+        // Store command from usb into the command ring buffer for later processing
+        usbCommand.buffer = cmdbuffer[bufindw];
+        usbCmd = get_command_usb(&usbCommand, cardSaving);
+        if (usbCmd) {
+
+            usbCmd[usbCommand.len] = '\0';
+            fromsd[bufindw] = false;
+            bufindw = (bufindw + 1)%BUFSIZE;
+            buflen += 1;
+        }
+    }
+
+    manage_heater();
+    manage_inactivity();
+    lcd_update();
+    lifetime_stats_tick();
+}
 
 void manage_inactivity()
 {
