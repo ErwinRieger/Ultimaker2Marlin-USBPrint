@@ -18,9 +18,15 @@
 // Serial port 0 is still used by the Arduino bootloader regardless of this setting.
 #define SERIAL_PORT 0
 
+/// MOD Erri, enable code for UM2 usb printing
+#define UM2USBPRINT
+
 // This determines the communication speed of the printer
-#define BAUDRATE 250000
-//#define BAUDRATE 115200
+#if defined(UM2USBPRINT)
+  #define BAUDRATE 115200
+#else
+  #define BAUDRATE 250000
+#endif
 
 //// The following define selects which electronics board you have. Please choose the one that matches your setup
 // 10 = Gen7 custom (Alfons3 Version) "https://github.com/Alfons3/Generation_7_Electronics"
