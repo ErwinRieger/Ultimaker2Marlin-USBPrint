@@ -176,7 +176,7 @@
 
 //Check if the heater heats up MAX_HEATING_TEMPERATURE_INCREASE within MAX_HEATING_CHECK_MILLIS while the PID was at the maximum.
 // If not, raise an error because most likely the heater is not heating up the temperature sensor. Indicating an issue in the system.
-#define MAX_HEATING_TEMPERATURE_INCREASE 20
+#define MAX_HEATING_TEMPERATURE_INCREASE 10
 #define MAX_HEATING_CHECK_MILLIS (20 * 1000)
 
 // If your bed has low resistance e.g. .6 ohm and throws the fuse you can duty cycle it to reduce the
@@ -270,7 +270,7 @@
 #define PREVENT_LENGTHY_EXTRUDE
 
 #define EXTRUDE_MINTEMP 170
-#define EXTRUDE_MAXLENGTH (X_MAX_LENGTH+Y_MAX_LENGTH) //prevent extrusion of very large distances.
+#define EXTRUDE_MAXLENGTH 1000.0 //prevent extrusion of very large distances.
 
 //===========================================================================
 //=============================Mechanical Settings===========================
@@ -386,6 +386,9 @@ const bool Z_ENDSTOPS_INVERTING = true; // set to true to invert the logic of th
 #define DEFAULT_XYJERK                20.0    // (mm/sec)
 #define DEFAULT_ZJERK                 0.4     // (mm/sec)
 #define DEFAULT_EJERK                 5.0    // (mm/sec)
+
+//Length of the bowden tube. Used for the material load/unload procedure.
+#define FILAMANT_BOWDEN_LENGTH        705
 
 //===========================================================================
 //=============================Additional Features===========================

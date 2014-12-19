@@ -563,6 +563,14 @@ void get_command_sd() {
         return;
     }
 
+    // >>>>>>> upstream/master
+    // if (serial_count!=0)
+    // {
+        // if (millis() - lastSerialCommandTime < 5000)
+        // return;
+        // serial_count = 0;
+    // }
+
     // if (card.pause) {
         // return;
     // }
