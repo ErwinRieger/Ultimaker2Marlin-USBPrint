@@ -519,7 +519,7 @@ ISR(TIMER1_COMPA_vect)
 
 
     for(int8_t i=0; i < step_loops; i++) { // Take multiple steps per interrupt (For high speed moves)
-      #if !defined(AT90USB) && !defined(ENABLE_ULTILCD2)
+      #if !defined(AT90USB) && !defined(UM2USBPRINT)
       MSerial.checkRx(); // Check for serial chars.
       #endif
 
@@ -889,11 +889,12 @@ void st_init()
 // Block until all buffered steps are executed
 void st_synchronize()
 {
-    while( blocks_queued()) {
-    manage_heater();
-    manage_inactivity();
-    lcd_update();
-    lifetime_stats_tick();
+  while( blocks_queued()) {
+    // manage_heater();
+    // manage_inactivity();
+    // lcd_update();
+    // lifetime_stats_tick();
+    doIdleTasks();
   }
 }
 
