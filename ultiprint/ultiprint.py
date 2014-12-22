@@ -65,7 +65,7 @@ class Preprocessor:
 
             inFile = open(filename)
 
-            print "Storing and/or auto-printing", filename
+            print "Preprocessing:", filename
             sys.stdout.flush()
 
             for line in inFile.readlines():
@@ -83,8 +83,10 @@ class Preprocessor:
 
         self.prep = self.preprocessGCode(gcode)
 
+        # debug
+        """
         if mode == "pre":
-            print "done, saving to /tmp/usb.g"
+            print "saving to /tmp/usb.g"
             f = open("/tmp/usb.g", "w")
             lnr = 0
             for (cmd, resp) in self.prep:
@@ -99,6 +101,7 @@ class Preprocessor:
                     f.writelines(cmd[len(n)+1:-(len(c)+1)] + "\n")
                 lnr += 1
             f.close()
+        """
 
     def printStat(self):
         print "\n-----------------------------------------------"
@@ -286,6 +289,7 @@ class Preprocessor:
 
             self.lineNr += 1
 
+        print "done..."
         return prep
 
 def isPackedCommand(cmd):
