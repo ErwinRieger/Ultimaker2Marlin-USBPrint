@@ -1365,6 +1365,51 @@ void get_coordinates_packed(char * buffer)
     #endif //FWRETRACT
 }
 
+#ifdef FWRETRACT
+void processG10() {
+
+  if(!retracted)
+  {
+
+    destination[X_AXIS]=current_position[X_AXIS];
+    destination[Y_AXIS]=current_position[Y_AXIS];
+    destination[Z_AXIS]=current_position[Z_AXIS];
+
+    /// xxx currently not supported by compression code in ultiprint.py:
+    #if EXTRUDERS > 1
+    if (code_seen('S') && code_value_long() == 1)
+        destination[E_AXIS]=current_position[E_AXIS]-extruder_swap_retract_length/volume_to_filament_length[active_extruder];
+    else
+        destination[E_AXIS]=current_position[E_AXIS]-retract_length/volume_to_filament_length[active_extruder];
+    #else
+    destination[E_AXIS]=current_position[E_AXIS]-retract_length/volume_to_filament_length[active_extruder];
+    #endif
+
+    float oldFeedrate = feedrate;
+    feedrate=retract_feedrate;
+    retract_recover_length = current_position[E_AXIS]-destination[E_AXIS];//Set the recover length to whatever distance we retracted so we recover properly.
+    retracted=true;
+    prepare_move();
+    feedrate = oldFeedrate;
+  }
+}
+
+void processG11() {
+  if(retracted)
+  {
+    destination[X_AXIS]=current_position[X_AXIS];
+    destination[Y_AXIS]=current_position[Y_AXIS];
+    destination[Z_AXIS]=current_position[Z_AXIS];
+    destination[E_AXIS]=current_position[E_AXIS]+retract_recover_length;
+    float oldFeedrate = feedrate;
+    feedrate=retract_recover_feedrate;
+    retracted=false;
+    prepare_move();
+    feedrate = oldFeedrate;
+  }
+}
+#endif //FWRETRACT
+
 #define HOMEAXIS(LETTER) homeaxis(LETTER##_AXIS)
 
 void process_commands()
@@ -1383,8 +1428,16 @@ void process_commands()
             if(Stopped == false) {
                 get_coordinates_packed(cmdbuffer[bufindr]); // For X Y Z E F
                 prepare_move();
-                return;
             }
+            break;
+        #ifdef FWRETRACT
+        case 3: // G10 retract
+            processG10();
+            break;
+        case 4: // G11 retract_recover
+            processG11();
+            break;
+        #endif //FWRETRACT
         }
   }
   else if(code_seen('G'))
@@ -1396,22 +1449,20 @@ void process_commands()
       if(Stopped == false) {
         get_coordinates(); // For X Y Z E F
         prepare_move();
-        //ClearToSend();
-        return;
       }
-      //break;
+      break;
     case 2: // G2  - CW ARC
       if(Stopped == false) {
         get_arc_coordinates();
         prepare_arc_move(true);
-        return;
       }
+      break;
     case 3: // G3  - CCW ARC
       if(Stopped == false) {
         get_arc_coordinates();
         prepare_arc_move(false);
-        return;
       }
+      break;
     case 4: // G4 dwell
       LCD_MESSAGEPGM(MSG_DWELL);
       codenum = 0;
@@ -1430,45 +1481,14 @@ void process_commands()
         doIdleTasks();
       }
       break;
-      #ifdef FWRETRACT
-      case 10: // G10 retract
-      if(!retracted)
-      {
-        destination[X_AXIS]=current_position[X_AXIS];
-        destination[Y_AXIS]=current_position[Y_AXIS];
-        destination[Z_AXIS]=current_position[Z_AXIS];
-        #if EXTRUDERS > 1
-        if (code_seen('S') && code_value_long() == 1)
-            destination[E_AXIS]=current_position[E_AXIS]-extruder_swap_retract_length/volume_to_filament_length[active_extruder];
-        else
-            destination[E_AXIS]=current_position[E_AXIS]-retract_length/volume_to_filament_length[active_extruder];
-        #else
-        destination[E_AXIS]=current_position[E_AXIS]-retract_length/volume_to_filament_length[active_extruder];
-        #endif
-        float oldFeedrate = feedrate;
-        feedrate=retract_feedrate;
-        retract_recover_length = current_position[E_AXIS]-destination[E_AXIS];//Set the recover length to whatever distance we retracted so we recover properly.
-        retracted=true;
-        prepare_move();
-        feedrate = oldFeedrate;
-      }
-
+    #ifdef FWRETRACT
+    case 10: // G10 retract
+      processG10();
       break;
-      case 11: // G11 retract_recover
-      if(retracted)
-      {
-        destination[X_AXIS]=current_position[X_AXIS];
-        destination[Y_AXIS]=current_position[Y_AXIS];
-        destination[Z_AXIS]=current_position[Z_AXIS];
-        destination[E_AXIS]=current_position[E_AXIS]+retract_recover_length;
-        float oldFeedrate = feedrate;
-        feedrate=retract_recover_feedrate;
-        retracted=false;
-        prepare_move();
-        feedrate = oldFeedrate;
-      }
+    case 11: // G11 retract_recover
+      processG11();
       break;
-      #endif //FWRETRACT
+    #endif //FWRETRACT
     case 28: //G28 Home all Axis one at a time
       printing_state = PRINT_STATE_HOMING;
       saved_feedrate = feedrate;
