@@ -412,13 +412,12 @@ class Printer(Serial):
         print "\nResetting printer"
 
         # self._send("M29\n") # End sd write, response: "Done saving"
-        # self._send("M0 P1\n") # Stop print
         # self._send("G28\n") # Home all Axis, response: ok
         # self._send("M84\n") # Disable steppers until next move, response: ok
         # self._send("M104 S0\n") # Set temp
         # self._send("M140 S0\n") # Set temp
 
-        gcode = ["M29", "M0 P1", "G28", "M84", "M104 S0", "M140 S0"]
+        gcode = ["M29", "G28", "M84", "M104 S0", "M140 S0"]
         prep = Preprocessor("reset", gcode = map(lambda x: (x, None), gcode))
 
         print "Reset code sequence: ", prep.prep
@@ -552,7 +551,6 @@ class Printer(Serial):
 # 
 # Main
 #
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='UltiPrint, print on UM2 over USB.')
