@@ -308,8 +308,6 @@ class Printer(Serial):
             baudrate = 115200,
             timeout = 0, parity = PARITY_NONE)
 
-        self.lineno = 0
-
         if mode == "print":
             # self.endTokens = ["Done printing", 'echo:enqueing "M84"']   
             self.endTokens = ['echo:enqueing "M84"']   
@@ -333,10 +331,8 @@ class Printer(Serial):
             print "Scheduling resend of command...", lastLine+1
 
             # assert(self.cmdIndex == lastLine + 2)
-            # assert(self.lineno == lastLine + 2)
 
             self.cmdIndex = lastLine + 1
-            self.lineno = lastLine+1
 
             # Slow down a bit in case of error
             time.sleep(0.1)
@@ -449,7 +445,6 @@ class Printer(Serial):
             sys.stdout.flush()
             self._send(cmd)
 
-        self.lineno += 1
 
     # Send a command to the printer
     def _send(self, cmd):
@@ -609,7 +604,6 @@ if __name__ == "__main__":
 
 
     prep = Preprocessor(args.mode, args.gfile)
-
     printer.sendGcode(prep.prep, "echo:SD card ok")
 
     prep.printStat();
