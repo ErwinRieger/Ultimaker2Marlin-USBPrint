@@ -40,7 +40,7 @@ from serial import Serial, SerialException, PARITY_NONE
 
 class Preprocessor:
 
-    def __init__(self, mode, filename=None, gcode=[]):
+    def __init__(self, mode, filename=None, gcode=[], stream=None):
 
         self.lineNr = 0
         self.origbytes = 0
@@ -50,7 +50,7 @@ class Preprocessor:
         # Always reset line counter first
         gcode = [("M110", "ok")] + gcode
 
-        if filename:
+        if filename or stream:
 
             # If in printing mode, then send custom M623 command,
             # select file for UM2 print
@@ -63,21 +63,35 @@ class Preprocessor:
             # Close file on SD card with M29 if done.
             gcode += [("M28 usb.g", "ok")]
 
-            inFile = open(filename)
+            if filename:
+                inFile = open(filename)
 
-            print "Preprocessing:", filename
-            sys.stdout.flush()
+                print "Preprocessing:", filename
+                sys.stdout.flush()
 
-            for line in inFile.readlines():
+                for line in inFile.readlines():
+    
+                    # Strip very long lines like ";CURA_PROFILE_STRING" line at the end of the file:
+                    # Marlin: #define MAX_CMD_SIZE 96
+                    if len(line) > 80:
+                        continue
 
-                # Strip very long lines like ";CURA_PROFILE_STRING" line at the end of the file:
-                # Marlin: #define MAX_CMD_SIZE 96
-                if len(line) > 80:
-                    continue
+                    gcode.append((line, None))
 
-                gcode.append((line, None))
+            if filename:
+                inFile.close()
+            else:
+                
+                print "Preprocessing:", stream
 
-            inFile.close()
+                for line in stream:
+
+                    # Strip very long lines like ";CURA_PROFILE_STRING" line at the end of the file:
+                    # Marlin: #define MAX_CMD_SIZE 96
+                    if len(line) > 80:
+                        continue
+
+                    gcode.append((line, None))
 
             gcode.append(("M29", Printer.endStoreToken))
 
@@ -444,7 +458,6 @@ class Printer(Serial):
             print "\nSend: ", cmd,
             sys.stdout.flush()
             self._send(cmd)
-
 
     # Send a command to the printer
     def _send(self, cmd):
