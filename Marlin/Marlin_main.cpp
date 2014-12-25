@@ -858,10 +858,16 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
           if (*cmdStart != ' ') goto syntaxError;
 
           cmdStart ++;
-      }
-      else {
-        // Make line number check happy
-        gcode_N = gcode_LastN+1;
+
+          if(gcode_N != gcode_LastN+1 && (strncmp_P(cmdStart, PSTR("M110"), 4) != 0) ) {
+
+            SERIAL_ERROR_START;
+            SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
+            SERIAL_ERRORLN(gcode_LastN);
+            // FlushSerialRequestResend();
+            MYSERIAL.flush();
+            return NULL;
+          }
       }
 
       // Check for checksum
@@ -888,6 +894,8 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
             }
       }
 
+      gcode_LastN = gcode_N;
+
       // Shift left, overwrite line number
       if (cmdStart != buffer) {
 
@@ -899,18 +907,6 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
         *ptr = '\0';
         usbCommand->len = ptr - buffer;
       }
-
-      if(gcode_N != gcode_LastN+1 && (strncmp_P(buffer, PSTR("M110"), 4) != 0) ) {
-
-        SERIAL_ERROR_START;
-        SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
-        SERIAL_ERRORLN(gcode_LastN);
-        // FlushSerialRequestResend();
-        MYSERIAL.flush();
-        return NULL;
-      }
-
-      gcode_LastN = gcode_N;
 
       // Skip empty commands
       if (buffer[0] == '\0') goto emptyCommand;
