@@ -106,7 +106,6 @@ void sim_check_interrupts()
             TCNT1 = ticks;
         }
 
-        /*
         uint8_t ucsr0a = UCSR0A;
 
         // Check for serial rx interrupt
@@ -114,7 +113,6 @@ void sim_check_interrupts()
             // printf("rx int enabled\n");
             USART0_RX_vect();
         }
-        */
 
         _sei();
     }
