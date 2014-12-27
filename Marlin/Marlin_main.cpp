@@ -811,7 +811,7 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
 char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
 {
 
-  long gcode_N = 0;
+  long gcode_N = -1;
 
   char * buffer = usbCommand->buffer;
 
@@ -894,7 +894,8 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
             }
       }
 
-      gcode_LastN = gcode_N;
+      if (gcode_N >= 0)
+          gcode_LastN = gcode_N;
 
       // Shift left, overwrite line number
       if (cmdStart != buffer) {
