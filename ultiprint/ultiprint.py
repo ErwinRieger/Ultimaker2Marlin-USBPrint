@@ -309,9 +309,16 @@ class Preprocessor:
 def isPackedCommand(cmd):
     return cmd[0] < "\n"
 
+
+class SERIALDISCON(SerialException):
+    pass
+
 class Printer(Serial):
 
     endStoreToken = "Done saving"
+    # Number of rx errors when we assume the
+    # line is dead.
+    maxRXErrors = 50
 
     def __init__(self, device, mode):
         Serial.__init__(
@@ -331,6 +338,9 @@ class Printer(Serial):
         self.mode = mode
         self.cmdIndex = 0
         self.lastSend = 0
+
+        # Retry counter on rx errors
+        self.rxErrors = 0
 
     # Check a printer response for an error
     def checkError(self, recvLine):
@@ -366,7 +376,7 @@ class Printer(Serial):
                 assert(0)
 
     # Read a response from printer, "handle" exceptions
-    def saveReadline(self):
+    def safeReadline(self):
 
         result = ""
 
@@ -375,11 +385,21 @@ class Printer(Serial):
                 c = self.read()
                 # print "c: ", c
             except SerialException as ex:
-                print "Readline() Exception raised:", ex
+                if self.rxErrors < 5:
+                    print "Readline() Exception raised:", ex
+
+                self.rxErrors += 1
+
+                if self.rxErrors >= Printer.maxRXErrors:
+                    print "declare line is dead ..."
+                    raise SERIALDISCON
                 break
 
             if not c:
                 break
+
+            # Received something, reset error counter
+            self.rxErrors = 0
 
             result += c
 
@@ -404,14 +424,12 @@ class Printer(Serial):
 
             if exceptional:
                 print "exception on select: ", exceptional
-                self.reset()
-                print "\n\nPrinter reset done, bailing out...\n\n"
-                assert(0)
 
             if readable:
-                recvLine = self.saveReadline()        
-
-                assert(recvLine)
+                try:
+                    recvLine = self.safeReadline()        
+                except SERIALDISCON:
+                    print "Line disconnected in readMore"
 
                 if recvLine:
                     if ord(recvLine[0]) > 20:
@@ -495,7 +513,7 @@ class Printer(Serial):
                 print "\n\nPrinter reset done, bailing out...\n\n"
                 assert(0)
 
-            recvLine = self.saveReadline()        
+            recvLine = self.safeReadline()        
 
             if not recvLine:
                 continue
@@ -597,7 +615,7 @@ if __name__ == "__main__":
     printer = Printer(args.device, args.mode)
 
     # Read left over garbage
-    recvLine = printer.saveReadline()        
+    recvLine = printer.safeReadline()        
     print "Initial read: "
     print recvLine.encode("hex"), "\n"
 
@@ -617,10 +635,15 @@ if __name__ == "__main__":
 
 
     prep = Preprocessor(args.mode, args.gfile)
-    printer.sendGcode(prep.prep, "echo:SD card ok")
+
+    try:
+        printer.sendGcode(prep.prep, "echo:SD card ok")
+    except SERIALDISCON:
+        print "Line disconnected in sendGcode(). Can't do a reset! Check your printer!"
+        sys.exit(1)
+
 
     prep.printStat();
-
 
 
 
