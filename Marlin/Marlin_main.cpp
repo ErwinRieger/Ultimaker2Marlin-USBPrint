@@ -257,18 +257,36 @@ static int buflen = 0;
 static char usbCmdBuffer[MAX_CMD_SIZE];
 
 // Structure to store the result of get_command_usb()
-struct UsbCommand {
-  // Number of characters read for current command
-  uint8_t serial_count;
-  // Poniter to Usb/serial read buffer.
-  char *buffer;
-  // Stringlength of command, excluding terminating null
-  uint8_t len;
-  // Number of characters in packed command
-  uint8_t packed_count;
+// XXX merge get_command_usb* functions into this
+class UsbCommand {
+    public:
+        // Number of characters read for current command
+        uint8_t serial_count;
+        // Poniter to Usb/serial read buffer.
+        char *buffer;
+        // Stringlength of command, excluding terminating null
+        uint8_t len;
+        // Number of characters in packed command
+        uint8_t packed_count;
+        // Timestamp of last serial receive to realize a timeout
+        unsigned long lastRecv;
+
+        UsbCommand() {
+            serial_count = 0;
+            buffer = NULL;
+            len = 0;
+            packed_count = 0;
+            lastRecv = 0;
+        }
+
+        void reset() {
+            serial_count = 0;
+            packed_count = 0;
+            MYSERIAL.flush();
+        }
 };
 
-static UsbCommand usbCommand = { 0, NULL, 0, 0 };
+static UsbCommand usbCommand;
 
 static void manage_inactivity();
 
@@ -774,7 +792,7 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
         SERIAL_ERROR(e);
         SERIAL_ERRORPGM(") Last Line:");
         SERIAL_ERRORLN(gcode_LastN);
-        MYSERIAL.flush();
+        usbCommand->reset();
         return NULL;
     }
 
@@ -787,6 +805,8 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
 
             // Store first char
             usbCommand->buffer[usbCommand->serial_count++] = serial_char;
+
+            usbCommand->lastRecv = millis();
 
             if (ISPACKEDCOMMAND(serial_char))
                 return get_command_usb_packed(usbCommand);
@@ -801,10 +821,21 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
     else {
 
       // Currently reading a command, call the apropriate worker
+
+      // Check timeout
+      if ((millis() - usbCommand->lastRecv) > 5000) {
+            SERIAL_ERROR_START;
+            SERIAL_ERRORPGM("RX Timeout");
+            SERIAL_ERRORPGM(" Last Line:");
+            SERIAL_ERRORLN(gcode_LastN);
+            usbCommand->reset();
+            return NULL;
+      }
+
       if (usbCommand->packed_count)
-        return get_command_usb_packed(usbCommand);
+            return get_command_usb_packed(usbCommand);
       else
-        return get_command_usb_unpacked(usbCommand, cardSaving);
+            return get_command_usb_unpacked(usbCommand, cardSaving);
     }
 }
 
@@ -865,7 +896,7 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
             SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
             SERIAL_ERRORLN(gcode_LastN);
             // FlushSerialRequestResend();
-            MYSERIAL.flush();
+            usbCommand->reset();
             return NULL;
           }
       }
@@ -889,7 +920,7 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
               SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
               SERIAL_ERRORLN(gcode_LastN);
               // FlushSerialRequestResend();
-              MYSERIAL.flush();
+              usbCommand->reset();
               return NULL;
             }
       }
@@ -976,7 +1007,7 @@ syntaxError:
   SERIAL_ERROR_START;
   SERIAL_ERRORPGM("Syntax error, Last Line:");
   SERIAL_ERRORLN(gcode_LastN);
-  MYSERIAL.flush();
+  usbCommand->reset();
   return NULL;
 }
 
@@ -1047,11 +1078,10 @@ char * get_command_usb_packed(UsbCommand *usbCommand) {
 
     if (*CHKSMPTR != checksum) {
 
-        usbCommand->packed_count = 0;
         SERIAL_ERROR_START;
         SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
         SERIAL_ERRORLN(gcode_LastN);
-        MYSERIAL.flush();
+        usbCommand->reset();
         return NULL;
     }
 
@@ -1084,11 +1114,10 @@ char * get_command_usb_packed(UsbCommand *usbCommand) {
     return buffer;
 
 lineError:
-    usbCommand->packed_count = 0;
     SERIAL_ERROR_START;
     SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
     SERIAL_ERRORLN(gcode_LastN);
-    MYSERIAL.flush();
+    usbCommand->reset();
     return NULL;
 }
 
