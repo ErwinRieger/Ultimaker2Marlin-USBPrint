@@ -358,8 +358,7 @@ class Printer(Serial):
 
             self.cmdIndex = lastLine + 1
 
-            # Slow down a bit in case of error
-            time.sleep(0.1)
+            # Enter synchronize mode
             return True
 
         for token in ["Error:", "cold extrusion", "SD init fail", "open failed"]:
@@ -494,10 +493,22 @@ class Printer(Serial):
         recvPart = None
 
         wantAck = False
+        syncMode = False
 
         while True:
 
-            if not wantAck and not wantReply and self.mode != "mon" and self.cmdIndex < len(gcode):
+            if syncMode:
+
+                if not wantAck:
+                    print "synchronized"
+                    syncMode = False
+                    continue
+
+                print "sending sync-newline"
+                self.send("\n")
+                time.sleep(0.1)
+
+            elif not wantAck and not wantReply and self.mode != "mon" and self.cmdIndex < len(gcode):
                 # send a line
                 (line, wantReply) = gcode[self.cmdIndex]
                 self.send(line)
@@ -505,13 +516,16 @@ class Printer(Serial):
                 self.lastSend = time.time()
                 wantAck = True
 
-            readable, writable, exceptional = select.select([self], [], [])
+            readable, writable, exceptional = select.select([self], [], [], 0.1)
 
             if exceptional:
                 print "exception on select: ", exceptional
                 self.reset()
                 print "\n\nPrinter reset done, bailing out...\n\n"
                 assert(0)
+
+            if not readable:
+                continue
 
             recvLine = self.safeReadline()        
 
@@ -530,7 +544,8 @@ class Printer(Serial):
 
             if self.mode != "mon" and self.checkError(recvLine):
                 # command resend
-                wantAck = False
+                syncMode = True
+                wantAck = True # !
                 wantReply = None
                 continue
 
