@@ -282,7 +282,16 @@ class UsbCommand {
         void reset() {
             serial_count = 0;
             packed_count = 0;
-            MYSERIAL.flush();
+
+            // MYSERIAL.flush();
+
+            // Drain usbserial buffers for 50 ms
+            unsigned long drainEnd = millis() + 50;
+            while (millis() < drainEnd) {
+                if( MYSERIAL.available() ) {
+                    MYSERIAL.read();
+                }
+            }
         }
 };
 
@@ -823,7 +832,7 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
       // Currently reading a command, call the apropriate worker
 
       // Check timeout
-      if ((millis() - usbCommand->lastRecv) > 5000) {
+      if ((millis() - usbCommand->lastRecv) > 1000) {
             SERIAL_ERROR_START;
             SERIAL_ERRORPGM("RX Timeout");
             SERIAL_ERRORPGM(" Last Line:");
