@@ -352,13 +352,14 @@ class Printer(Serial):
 
             print "\nERROR:"
             print "Reply: ", recvLine,
-            print "Scheduling resend of command...", lastLine+1
+            print "Scheduling resend of command:", lastLine+1
 
             # assert(self.cmdIndex == lastLine + 2)
 
             self.cmdIndex = lastLine + 1
 
-            # Enter synchronize mode
+            # Wait 0.1 sec, give firmware time to drain buffers
+            time.sleep(0.5)
             return True
 
         for token in ["Error:", "cold extrusion", "SD init fail", "open failed"]:
@@ -493,22 +494,10 @@ class Printer(Serial):
         recvPart = None
 
         wantAck = False
-        syncMode = False
 
         while True:
 
-            if syncMode:
-
-                if not wantAck:
-                    print "synchronized"
-                    syncMode = False
-                    continue
-
-                print "sending sync-newline"
-                self.send("\n")
-                time.sleep(0.1)
-
-            elif not wantAck and not wantReply and self.mode != "mon" and self.cmdIndex < len(gcode):
+            if not wantAck and not wantReply and self.mode != "mon" and self.cmdIndex < len(gcode):
                 # send a line
                 (line, wantReply) = gcode[self.cmdIndex]
                 self.send(line)
@@ -544,8 +533,7 @@ class Printer(Serial):
 
             if self.mode != "mon" and self.checkError(recvLine):
                 # command resend
-                syncMode = True
-                wantAck = True # !
+                wantAck = False
                 wantReply = None
                 continue
 
