@@ -268,15 +268,15 @@ class UsbCommand {
         uint8_t len;
         // Number of characters in packed command
         uint8_t packed_count;
-        // Timestamp of last serial receive to realize a timeout
-        unsigned long lastRecv;
+        // Timestamp start character of a usbserial command
+        unsigned long startTS;
 
         UsbCommand() {
             serial_count = 0;
             buffer = NULL;
             len = 0;
             packed_count = 0;
-            lastRecv = 0;
+            startTS = 0;
         }
 
         void reset() {
@@ -815,7 +815,7 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
             // Store first char
             usbCommand->buffer[usbCommand->serial_count++] = serial_char;
 
-            usbCommand->lastRecv = millis();
+            usbCommand->startTS = millis();
 
             if (ISPACKEDCOMMAND(serial_char))
                 return get_command_usb_packed(usbCommand);
@@ -831,8 +831,17 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
 
       // Currently reading a command, call the apropriate worker
 
-      // Check timeout
-      if ((millis() - usbCommand->lastRecv) > 1000) {
+      //
+      // Check timeout, reasons for a timeout:
+      //
+      //   * The terminating newline of a ascii-command was lost
+      //   * A character of a packed binary command was lost
+      //
+      // In both cases we have a deadlock situation: Firmware waits
+      // for more characters to arrive and host application waits for
+      // the acknowledge of the last sent command.
+      //
+      if ((millis() - usbCommand->startTS) > 1000) {
             SERIAL_ERROR_START;
             SERIAL_ERRORPGM("RX Timeout");
             SERIAL_ERRORPGM(" Last Line:");
