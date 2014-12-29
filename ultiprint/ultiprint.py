@@ -454,11 +454,11 @@ class Printer(Serial):
 
         print "Reset code sequence: ", prep.prep
 
-        self.readMore(50)
-
         for (cmd, resp) in prep.prep:
             self.send(cmd)
-            self.readMore(25)
+            self.readMore(5)
+
+        self.readMore(50)
 
     # Send a command to the printer, add a newline if 
     # needed.
