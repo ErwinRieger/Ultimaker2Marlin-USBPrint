@@ -590,40 +590,28 @@ void get_command_sd() {
         return;
     }
 
-    // >>>>>>> upstream/master
-    // if (serial_count!=0)
-    // {
-        // if (millis() - lastSerialCommandTime < 5000)
-        // return;
-        // serial_count = 0;
-    // }
-
     // if (card.pause) {
         // return;
     // }
 
     // At the start of a new command, peek first byte and decide if
     // it's a plain text or a packed binary command:
-    // if ( buflen < BUFSIZE ) {
+    int16_t c = card.get();
+    uint8_t sd_count;
 
-        int16_t c = card.get();
-        uint8_t sd_count;
+    // xxx errorchecking...
+    if (ISPACKEDCOMMAND(c))
+        sd_count = get_command_sd_packed(c);
+    else
+        sd_count = get_command_sd_unpacked(c);
 
-        // xxx errorchecking...
-        if (ISPACKEDCOMMAND(c))
-            sd_count = get_command_sd_packed(c);
-        else
-            sd_count = get_command_sd_unpacked(c);
+    if (sd_count) {
 
-        if (sd_count) {
-
-            fromsd[bufindw] = true;
-            cmdbuffer[bufindw][sd_count] = 0; //terminate string
-            // printf("read '%s'\n", cmdbuffer[bufindw]);
-            buflen += 1;
-            bufindw = (bufindw + 1)%BUFSIZE;
-        }
-    // }
+        fromsd[bufindw] = true;
+        cmdbuffer[bufindw][sd_count] = 0; //terminate string
+        buflen += 1;
+        bufindw = (bufindw + 1)%BUFSIZE;
+    }
     #endif
 }
 
