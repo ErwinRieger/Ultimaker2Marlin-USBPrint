@@ -297,6 +297,20 @@ class UsbCommand {
 
 static UsbCommand usbCommand;
 
+#if defined(ExtendedStats)
+//
+// Bit 0: Line Error
+// Bit 1: Checksum Error
+// Bit 2: RX Error
+// Bit 4: Timeout Error
+#define EFLineError 0x1
+#define EFCheckError 0x2
+#define EFSyntaxError 0x4
+#define EFRXError 0x8
+#define EFTimeoutError 0x10
+uint8_t errorFlags = 0;
+#endif
+
 static void manage_inactivity();
 
 //static int i = 0;
@@ -790,6 +804,9 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
         SERIAL_ERRORPGM(") Last Line:");
         SERIAL_ERRORLN(gcode_LastN);
         usbCommand->reset();
+        #if defined(ExtendedStats)
+            errorFlags |= EFRXError;
+        #endif
         return NULL;
     }
 
@@ -835,6 +852,9 @@ char * get_command_usb(UsbCommand *usbCommand, bool cardSaving)
             SERIAL_ERRORPGM(" Last Line:");
             SERIAL_ERRORLN(gcode_LastN);
             usbCommand->reset();
+            #if defined(ExtendedStats)
+                errorFlags |= EFTimeoutError;
+            #endif
             return NULL;
       }
 
@@ -903,6 +923,9 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
             SERIAL_ERRORLN(gcode_LastN);
             // FlushSerialRequestResend();
             usbCommand->reset();
+            #if defined(ExtendedStats)
+                errorFlags |= EFLineError;
+            #endif
             return NULL;
           }
       }
@@ -927,6 +950,9 @@ char * get_command_usb_unpacked(UsbCommand *usbCommand, bool cardSaving)
               SERIAL_ERRORLN(gcode_LastN);
               // FlushSerialRequestResend();
               usbCommand->reset();
+              #if defined(ExtendedStats)
+                errorFlags |= EFCheckError;
+              #endif
               return NULL;
             }
       }
@@ -1014,6 +1040,9 @@ syntaxError:
   SERIAL_ERRORPGM("Syntax error, Last Line:");
   SERIAL_ERRORLN(gcode_LastN);
   usbCommand->reset();
+  #if defined(ExtendedStats)
+    errorFlags |= EFSyntaxError;
+  #endif
   return NULL;
 }
 
@@ -1088,6 +1117,9 @@ char * get_command_usb_packed(UsbCommand *usbCommand) {
         SERIAL_ERRORPGM(MSG_ERR_CHECKSUM_MISMATCH);
         SERIAL_ERRORLN(gcode_LastN);
         usbCommand->reset();
+        #if defined(ExtendedStats)
+            errorFlags |= EFCheckError;
+        #endif
         return NULL;
     }
 
@@ -1124,6 +1156,9 @@ lineError:
     SERIAL_ERRORPGM(MSG_ERR_LINE_NO);
     SERIAL_ERRORLN(gcode_LastN);
     usbCommand->reset();
+    #if defined(ExtendedStats)
+        errorFlags |= EFLineError;
+    #endif
     return NULL;
 }
 
@@ -1272,6 +1307,38 @@ static void homeaxis(int axis) {
   }
 }
 
+#ifdef FWRETRACT
+void doAutoretract() {
+
+    float echange=destination[E_AXIS]-current_position[E_AXIS];
+    if(echange<-MIN_RETRACT) //retract
+    {
+        if(!retracted)
+        {
+            destination[Z_AXIS]+=retract_zlift; //not sure why chaninging current_position negatively does not work.
+            //if slicer retracted by echange=-1mm and you want to retract 3mm, corrrectede=-2mm additionally
+            float correctede=-echange-retract_length;
+            //to generate the additional steps, not the destination is changed, but inversely the current position
+            current_position[E_AXIS]+=-correctede;
+            feedrate=retract_feedrate;
+            retracted=true;
+        }
+    }
+    else if(echange>MIN_RETRACT) //retract_recover
+    {
+        if(retracted)
+        {
+            //current_position[Z_AXIS]+=-retract_zlift;
+            //if slicer retracted_recovered by echange=+1mm and you want to retract_recover 3mm, corrrectede=2mm additionally
+            float correctede=-echange+1*retract_length+retract_recover_length; //total unretract=retract_length+retract_recover_length[surplus]
+            current_position[E_AXIS]+=correctede; //to generate the additional steps, not the destination is changed, but inversely the current position
+            feedrate=retract_recover_feedrate;
+            retracted=false;
+        }
+    }
+}
+#endif //FWRETRACT
+
 void get_coordinates()
 {
     bool seen[4]={false,false,false,false};
@@ -1292,51 +1359,23 @@ void get_coordinates()
         next_feedrate = code_value();
         if(next_feedrate > 0.0) feedrate = next_feedrate;
     }
-    #ifdef FWRETRACT
 
-    if(autoretract_enabled)
-    {
-        if( !(seen[X_AXIS] || seen[Y_AXIS] || seen[Z_AXIS]) && seen[E_AXIS])
-        {
-            float echange=destination[E_AXIS]-current_position[E_AXIS];
-            if(echange<-MIN_RETRACT) //retract
-            {
-                if(!retracted)
-                {
-                    destination[Z_AXIS]+=retract_zlift; //not sure why chaninging current_position negatively does not work.
-                    //if slicer retracted by echange=-1mm and you want to retract 3mm, corrrectede=-2mm additionally
-                    float correctede=-echange-retract_length;
-                    //to generate the additional steps, not the destination is changed, but inversely the current position
-                    current_position[E_AXIS]+=-correctede;
-                    feedrate=retract_feedrate;
-                    retracted=true;
-                }
-            }
-            else if(echange>MIN_RETRACT) //retract_recover
-            {
-                if(retracted)
-                {
-                    //current_position[Z_AXIS]+=-retract_zlift;
-                    //if slicer retracted_recovered by echange=+1mm and you want to retract_recover 3mm, corrrectede=2mm additionally
-                    float correctede=-echange+1*retract_length+retract_recover_length; //total unretract=retract_length+retract_recover_length[surplus]
-                    current_position[E_AXIS]+=correctede; //to generate the additional steps, not the destination is changed, but inversely the current position
-                    feedrate=retract_recover_feedrate;
-                    retracted=false;
-                }
-            }
-        }
-    }
-    #endif //FWRETRACT
+    #ifdef FWRETRACT
+    if (autoretract_enabled && !(seen[X_AXIS] || seen[Y_AXIS] || seen[Z_AXIS]) && seen[E_AXIS])
+        doAutoretract();
+    #endif
 }
+
+#define XYZNotSeen(parammask) ((parammask & 0x70) == 0)
+#define ESeen(parammask) (parammask & 0x8)
 
 void get_coordinates_packed(char * buffer)
 {
-    bool seen[4]={false,false,false,false};
-
     int8_t paramMask = buffer[1];
 
     buffer += 2; // point to first param
 
+    // Check if F(eed) parameter is present
     if(paramMask & 0x80) {
         feedrate = *((uint16_t*)buffer); // skip command and paramMask, read short
         buffer += 2; // point to next param
@@ -1344,13 +1383,13 @@ void get_coordinates_packed(char * buffer)
 
     int8_t mask = 0x40;
 
+    // Check if X, Y, Z and E parameters are present
     for(int8_t i=0; i < NUM_AXIS; i++)
     {
         if(paramMask & mask) {
 
             destination[i] = *((float*)buffer) + (axis_relative_modes[i] || relative_mode)*current_position[i];
             buffer += 4; // point to next param
-            seen[i]=true;
         }
         else
         {
@@ -1361,40 +1400,9 @@ void get_coordinates_packed(char * buffer)
     }
 
     #ifdef FWRETRACT
-
-    if(autoretract_enabled)
-    {
-        if( !(seen[X_AXIS] || seen[Y_AXIS] || seen[Z_AXIS]) && seen[E_AXIS])
-        {
-            float echange=destination[E_AXIS]-current_position[E_AXIS];
-            if(echange<-MIN_RETRACT) //retract
-            {
-                if(!retracted)
-                {
-                    destination[Z_AXIS]+=retract_zlift; //not sure why chaninging current_position negatively does not work.
-                    //if slicer retracted by echange=-1mm and you want to retract 3mm, corrrectede=-2mm additionally
-                    float correctede=-echange-retract_length;
-                    //to generate the additional steps, not the destination is changed, but inversely the current position
-                    current_position[E_AXIS]+=-correctede;
-                    feedrate=retract_feedrate;
-                    retracted=true;
-                }
-            }
-            else if(echange>MIN_RETRACT) //retract_recover
-            {
-                if(retracted)
-                {
-                    //current_position[Z_AXIS]+=-retract_zlift;
-                    //if slicer retracted_recovered by echange=+1mm and you want to retract_recover 3mm, corrrectede=2mm additionally
-                    float correctede=-echange+1*retract_length+retract_recover_length; //total unretract=retract_length+retract_recover_length[surplus]
-                    current_position[E_AXIS]+=correctede; //to generate the additional steps, not the destination is changed, but inversely the current position
-                    feedrate=retract_recover_feedrate;
-                    retracted=false;
-                }
-            }
-        }
-    }
-    #endif //FWRETRACT
+    if (autoretract_enabled && XYZNotSeen(paramMask) && ESeen(paramMask))
+        doAutoretract();
+    #endif
 }
 
 #ifdef FWRETRACT
@@ -1483,6 +1491,7 @@ void process_commands()
         prepare_move();
       }
       break;
+    #if defined(TOOBIG)
     case 2: // G2  - CW ARC
       if(Stopped == false) {
         get_arc_coordinates();
@@ -1495,6 +1504,7 @@ void process_commands()
         prepare_arc_move(false);
       }
       break;
+    #endif
     case 4: // G4 dwell
       LCD_MESSAGEPGM(MSG_DWELL);
       codenum = 0;
@@ -3249,8 +3259,8 @@ void doIdleTasks()
             // card.write_command(usbCmd);
             usbCmd[usbCommand.len] = '\n';
             if (card.write_string(usbCmd, usbCommand.len+1)) {
-            SERIAL_ERROR_START;
-            SERIAL_ERRORLNPGM(MSG_SD_ERR_WRITE_TO_FILE);
+                SERIAL_ERROR_START;
+                SERIAL_ERRORLNPGM(MSG_SD_ERR_WRITE_TO_FILE);
             }
 
             #if 0
