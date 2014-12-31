@@ -495,6 +495,8 @@ static char* lcd_extstats_item(uint8_t nr)
         strcpy_P(card.longFilename, PSTR("< RETURN"));
     else if (nr == 1)
         strcpy_P(card.longFilename, PSTR("Timer1 ISR delay"));
+    else if (nr == 2)
+        strcpy_P(card.longFilename, PSTR("Error flags"));
     return card.longFilename;
 }
 
@@ -505,12 +507,14 @@ static void lcd_extstats_details(uint8_t nr)
         return;
     else if(nr == 1)
         int_to_string(stepperDelay, buffer, PSTR("%"));
+    else if(nr == 2)
+        sprintf_P(buffer, PSTR("0x%x"), errorFlags);
     lcd_lib_draw_string(5, 53, buffer);
 }
 
 static void lcd_menu_extended_stats()
 {
-    lcd_scroll_menu(PSTR("Extended Stats"), 2, lcd_extstats_item, lcd_extstats_details);
+    lcd_scroll_menu(PSTR("Extended Stats"), 3, lcd_extstats_item, lcd_extstats_details);
     if (lcd_lib_button_pressed)
     {
         if (IS_SELECTED_SCROLL(0))
@@ -520,6 +524,10 @@ static void lcd_menu_extended_stats()
         else if (IS_SELECTED_SCROLL(1))
         {
             stepperDelay = 0;
+        }
+        else if (IS_SELECTED_SCROLL(2))
+        {
+            errorFlags = 0;
         }
     }
 }
