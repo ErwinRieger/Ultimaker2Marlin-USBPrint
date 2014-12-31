@@ -249,6 +249,7 @@ extern uint8_t active_extruder;
 #define ExtendedStats 1
 #if defined(ExtendedStats)
 extern uint16_t stepperDelay;
+extern uint8_t errorFlags;
 #endif
 
 #endif
