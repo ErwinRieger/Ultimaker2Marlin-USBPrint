@@ -316,7 +316,7 @@ class SERIALDISCON(SerialException):
 class Printer(Serial):
 
     endStoreToken = "Done saving"
-    # Number of rx errors when we assume the
+    # Number of rx errors till we assume the
     # line is dead.
     maxRXErrors = 50
 
@@ -393,6 +393,8 @@ class Printer(Serial):
                 if self.rxErrors >= Printer.maxRXErrors:
                     print "declare line is dead ..."
                     raise SERIALDISCON
+
+                time.sleep(0.1)
                 break
 
             if not c:
@@ -430,6 +432,7 @@ class Printer(Serial):
                     recvLine = self.safeReadline()        
                 except SERIALDISCON:
                     print "Line disconnected in readMore"
+                    return
 
                 if recvLine:
                     if ord(recvLine[0]) > 20:
