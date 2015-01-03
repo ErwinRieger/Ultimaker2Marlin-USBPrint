@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+# vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
+
 #
 # Copyright (C) 2014 Erwin Rieger
 #
@@ -32,11 +34,14 @@
 #   G11: 4
 # 
 
-
 import sys, string, time, select, struct, argparse, collections
 
 from serial import Serial, SerialException, PARITY_NONE
 
+class DummyEvent:
+
+    def RequestMore(self, b):
+        pass
 
 class Preprocessor:
 
@@ -320,27 +325,51 @@ class Printer(Serial):
     # line is dead.
     maxRXErrors = 50
 
-    def __init__(self, device, mode):
-        Serial.__init__(
-            self,
-            port = device,
-            # baudrate = 250000,
-            # baudrate = 38400,
-            baudrate = 115200,
-            timeout = 0, parity = PARITY_NONE)
+    def __init__(self):
 
-        if mode == "print":
-            # self.endTokens = ["Done printing", 'echo:enqueing "M84"']   
-            self.endTokens = ['echo:enqueing "M84"']   
-        else:
-            self.endTokens = [self.endStoreToken, 'echo:enqueing "M84"']
+        Serial.__init__(self)
 
-        self.mode = mode
-        self.cmdIndex = 0
+        self.mode = None
+        self.endTokens = None
         self.lastSend = 0
+
+        self.gcodeData = []
+        self.gcodePos = 0
 
         # Retry counter on rx errors
         self.rxErrors = 0
+
+        # Timespan where we monitor the serial line after the
+        # print has finished.
+        self.postMonitor = 0
+
+        self.printing = False
+
+        self.startTime = None
+
+        self.wantReply = None
+        self.wantAck = None
+        # Part of a response read from printer
+        self.recvPart = ""
+
+    def initMode(self, mode):
+
+        self.mode = mode
+
+        self.endTokens = ['echo:enqueing "M84"']   
+            
+    def initSerial(self, device, br=115200):
+        self.port = device
+        self.baudrate = br
+        self.timeout = 0.05
+        self.writeTimeout = 10
+        self.open()
+
+    def showMessage(self, s):
+        print s
+
+    def showError(self, s):
+        print "\n%s" %s
 
     # Check a printer response for an error
     def checkError(self, recvLine):
@@ -354,9 +383,9 @@ class Printer(Serial):
             print "Reply: ", recvLine,
             print "Scheduling resend of command:", lastLine+1
 
-            # assert(self.cmdIndex == lastLine + 2)
+            # assert(self.gcodePos == lastLine + 2)
 
-            self.cmdIndex = lastLine + 1
+            self.gcodePos = lastLine + 1
 
             # Wait 0.1 sec, give firmware time to drain buffers
             time.sleep(0.5)
@@ -365,15 +394,20 @@ class Printer(Serial):
         for token in ["Error:", "cold extrusion", "SD init fail", "open failed"]:
             if token in recvLine:
 
-                print "\nERROR:"
-                print "Reply: ", recvLine,
-                sys.stdout.flush()
-                self.readMore(20)
+                self.printing = False
+
+                s = "ERROR: reply from printer: '%s'" % recvLine
+                self.showError(s)
+
+                # print "\nERROR:"
+                # print "Reply: ", recvLine,
+                # sys.stdout.flush()
+                # self.readMore(20)
 
                 self.reset()
 
-                print "\n\nPrinter reset done, bailing out...\n\n"
-                assert(0)
+                # print "\n\nPrinter reset done, bailing out...\n\n"
+                # assert(0)
 
     # Read a response from printer, "handle" exceptions
     def safeReadline(self):
@@ -417,31 +451,25 @@ class Printer(Serial):
     # Monitor printer responses for a while (wait waitcount * 0.1 seconds)
     def readMore(self, waitcount=100):
 
-        print "waiting %.2f seconds for more messages..." % (waitcount/10.0)
-        sys.stdout.flush()
+        print "waiting %.2f seconds for more messages..." % (waitcount/20.0)
 
         for i in range(waitcount):
 
-            readable, writable, exceptional = select.select([self], [], [], 0.1)
+            try:
+                recvLine = self.safeReadline()        
+            except SERIALDISCON:
+                print "Line disconnected in readMore"
+                return
 
-            if exceptional:
-                print "exception on select: ", exceptional
-
-            if readable:
-                try:
-                    recvLine = self.safeReadline()        
-                except SERIALDISCON:
-                    print "Line disconnected in readMore"
-                    return
-
-                if recvLine:
-                    if ord(recvLine[0]) > 20:
-                        print "Reply: ", recvLine,
-                    else:
-                        print "Reply: 0x%s" % recvLine.encode("hex")
-                    sys.stdout.flush()
+            if recvLine:
+                if ord(recvLine[0]) > 20:
+                    print "Reply: ", recvLine,
+                else:
+                    print "Reply: 0x%s" % recvLine.encode("hex")
 
     # Stop and reset the printer
+    # xxx does not work right yet, um2 display still says 'preheating...'
+    # yyy is this still the case?
     def reset(self):
 
         print "\nResetting printer"
@@ -461,128 +489,142 @@ class Printer(Serial):
             self.send(cmd)
             self.readMore(5)
 
-        self.readMore(50)
-
     # Send a command to the printer, add a newline if 
     # needed.
     def send(self, cmd):
 
-        assert(cmd[-1] == "\n")
-
         if isPackedCommand(cmd):
         
             print "\nSend: ", cmd.encode("hex")
-            sys.stdout.flush()
-            self._send(cmd)
+            self.write(cmd)
         else:
 
             print "\nSend: ", cmd,
-            sys.stdout.flush()
-            self._send(cmd)
-
-    # Send a command to the printer
-    def _send(self, cmd):
-
-        self.write(cmd)
+            self.write(cmd)
 
 
     # The 'mainloop' process each command in the list 'gcode', check
     # for the required responses and do errorhandling.
-    def sendGcode(self, gcode, wantReply=None, waitForEndReply=True):
+    def sendGcode(self, gcode, wantReply=None):
 
-        startTime = time.time()
+        self.printing = True
 
-        self.cmdIndex = 0
+        self.startTime = time.time()
 
-        recvPart = None
+        self.gcodeData = gcode
+        self.gcodePos = 0
 
-        wantAck = False
+        self.wantReply = wantReply
+        self.wantAck = False
 
-        while True:
+        self.recvPart = None
 
-            if not wantAck and not wantReply and self.mode != "mon" and self.cmdIndex < len(gcode):
-                # send a line
-                (line, wantReply) = gcode[self.cmdIndex]
-                self.send(line)
-                self.cmdIndex += 1
-                self.lastSend = time.time()
-                wantAck = True
+        ev = DummyEvent()
 
-            readable, writable, exceptional = select.select([self], [], [], 0.1)
+        while self.processCommand(ev):
+            pass
 
-            if exceptional:
-                print "exception on select: ", exceptional
-                self.reset()
-                print "\n\nPrinter reset done, bailing out...\n\n"
-                assert(0)
+    def processCommand(self, ev):
 
-            if not readable:
-                continue
+        if not self.printing and time.time() > self.postMonitor:
+            return False
 
+        # if time.time() <  self.postMonitor: 
+            # print "postmon: ", self.wantAck, self.wantReply, self.gcodePos
+        
+        # if self.printing:
+            # print "print: ", self.wantAck, self.wantReply, self.gcodePos
+
+        if self.printing and not self.wantAck and not self.wantReply and self.mode != "mon" and self.gcodePos < len(self.gcodeData):
+            # send a line
+            (line, self.wantReply) = self.gcodeData[self.gcodePos]
+            self.send(line)
+            self.gcodePos += 1
+            self.lastSend = time.time()
+            self.wantAck = True
+
+            # Update gui
+            if (self.gcodePos % 250) == 0:
+                duration = time.time() - self.startTime
+                self.showMessage("Sent %d/%d gcodes, %.1f gcodes/sec" % (self.gcodePos, len(self.gcodeData), self.gcodePos/duration))
+
+            # We have sent a command to the printer, request more
+            # cpu cycles from wx to process the answer quickly
+            ev.RequestMore(True)
+
+        try:
             recvLine = self.safeReadline()        
+        except SERIALDISCON:
+            self.printing = False
+            self.postMonitor = 0
+            self.showError("Line disconnected in processCommand(). Can't do a reset! Check your printer!")
+            return False
 
-            if not recvLine:
-                continue
+        if not recvLine:
+            return True
 
-            # print "R0:", ord(recvLine[0])
+        # There was something to read, so request more
+        # cpu cycles from wx
+        ev.RequestMore(True)
 
-            if recvPart:
-                recvLine = recvPart + recvLine
-                recvPart = None
 
-            if recvLine[-1] != "\n":
-                recvPart = recvLine
-                continue
+        if self.recvPart:
+            recvLine = self.recvPart + recvLine
+            self.recvPart = None
 
-            if self.mode != "mon" and self.checkError(recvLine):
-                # command resend
-                wantAck = False
-                wantReply = None
-                continue
+        if recvLine[-1] != "\n":
+            self.recvPart = recvLine
+            return True
 
-            if wantAck and recvLine[0] == chr(0x6):
-                print "ACK"
-                wantAck = False
-                sys.stdout.flush()
-                continue
+        if self.mode != "mon" and self.checkError(recvLine):
+            # command resend
+            self.wantAck = False
+            self.wantReply = None
+            return True
 
-            if wantReply and recvLine.startswith(wantReply):
-                print "Got Required reply: ", recvLine,
-                wantReply = None
+        if self.wantAck and recvLine[0] == chr(0x6):
+            print "ACK"
+            self.wantAck = False
+            return True
+
+        if self.wantReply and recvLine.startswith(self.wantReply):
+            print "Got Required reply: ", recvLine,
+            self.wantReply = None
+        else:
+            print "Reply: ", recvLine,
+
+        # self.endTokens = ['echo:enqueing "M84"']   
+
+        if recvLine.startswith(self.endStoreToken):
+
+            self.postMonitor = time.time() + 5
+
+            print "\n-----------------------------------------------"
+            print "Store statistics:"
+            print "-----------------------------------------------\n"
+            self.storeDuration = time.time() - self.startTime
+
+            if self.mode == "store":
+                self.showMessage("Sent %d gcodes in %.1f seconds, %.1f gcodes/sec." % (self.gcodePos, self.storeDuration, self.gcodePos/self.storeDuration))
+                self.printing = False
             else:
-                print "Reply: ", recvLine,
+                self.showMessage("Sent %d gcodes in %.1f seconds, %.1f gcodes/sec.\nPlease wait for the print to finish.\n" % (self.gcodePos, self.storeDuration, self.gcodePos/self.storeDuration))
 
-            if recvLine.startswith(self.endStoreToken):
-                print "\n-----------------------------------------------"
-                print "Store statistics:"
-                print "-----------------------------------------------\n"
-                duration = time.time() - startTime
-                print "Sent %d commands in %.1f seconds, %.1f commands/second.\n" % (len(gcode), duration, len(gcode)/duration)
+        else:
 
-            sys.stdout.flush()
+            for token in self.endTokens:
+                if recvLine.startswith(token):
 
-            if waitForEndReply:
-                for token in self.endTokens:
-                    if recvLine.startswith(token):
+                    self.postMonitor = time.time() + 5
 
-                        sys.stdout.flush()
-                        self.readMore()
+                    print "end-reply received, finished print..."
+                    self.printing = False
 
-                        print "end-reply received, exiting..."
-                        sys.stdout.flush()
-                        return
+                    duration = time.time() - self.startTime
 
-            elif not wantReply and self.cmdIndex == len(gcode):
+                    self.showMessage("Print finished. Duration: %.1f seconds, Downloadspeed: %.1f gcodes/sec.\n" % (duration, self.gcodePos/self.storeDuration))
 
-                print "\nsent %d commands,  exiting..." % len(gcode)
-                sys.stdout.flush()
-
-                self.readMore()
-                return
-
-
-
-
+        return True
 
 # 
 # Main
@@ -618,7 +660,9 @@ if __name__ == "__main__":
         prep.printStat();
         sys.exit(0)
 
-    printer = Printer(args.device, args.mode)
+    printer = Printer()
+    printer.initMode(args.mode)
+    printer.initSerial(args.device)
 
     # Read left over garbage
     recvLine = printer.safeReadline()        
@@ -630,6 +674,7 @@ if __name__ == "__main__":
         # Reset printer
         #
         printer.reset()
+        printer.readMore(50)
         sys.exit(0)
 
     if args.mode == "mon":
@@ -642,11 +687,7 @@ if __name__ == "__main__":
 
     prep = Preprocessor(args.mode, args.gfile)
 
-    try:
-        printer.sendGcode(prep.prep, "echo:SD card ok")
-    except SERIALDISCON:
-        print "Line disconnected in sendGcode(). Can't do a reset! Check your printer!"
-        sys.exit(1)
+    printer.sendGcode(prep.prep, "echo:SD card ok")
 
 
     prep.printStat();
