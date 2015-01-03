@@ -1491,7 +1491,7 @@ void process_commands()
         prepare_move();
       }
       break;
-    #if defined(TOOBIG)
+    // #if defined(TOOBIG)
     case 2: // G2  - CW ARC
       if(Stopped == false) {
         get_arc_coordinates();
@@ -1504,7 +1504,7 @@ void process_commands()
         prepare_arc_move(false);
       }
       break;
-    #endif
+    // #endif
     case 4: // G4 dwell
       LCD_MESSAGEPGM(MSG_DWELL);
       codenum = 0;
