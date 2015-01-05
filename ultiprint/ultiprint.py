@@ -16,13 +16,13 @@
 # N5860 G1 F3000 X153.16 Y123.17 Z38.80 E459.21186*62 -> 51 bytes
 # 
 # 1 byte:            command key, 1-9
-# 1 byte:            'parameter mask', bits: FXYZES00 (2 unused bytes)
-# 2 byte:            F param
-# 4 byte:            X param
-# 4 byte:            Y param
-# 4 byte:            Z param
-# 4 byte:            E param
-# 4 byte:            2 or 4byte line counter, am schluss, damit einfach abzuschneiden
+# 1 byte:           'parameter mask', bits: FXYZES00 (2 unused bits)
+# 2 bytes:           F param
+# 4 bytes:           X param
+# 4 bytes:           Y param
+# 4 bytes:           Z param
+# 4 bytes:           E param
+# 2/4 bytes:         2 or 4byte line counter, am schluss, damit einfach abzuschneiden
 # 1 byte:            checksum
 # 
 # 
