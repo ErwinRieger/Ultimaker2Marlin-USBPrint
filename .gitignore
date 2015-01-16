@@ -4,6 +4,7 @@ applet/
 *.orig
 *.rej
 *.swp
+*.pyc
 Marlin/debug.log
 Marlin/Marlin.sdf
 Marlin/Marlin.sln
