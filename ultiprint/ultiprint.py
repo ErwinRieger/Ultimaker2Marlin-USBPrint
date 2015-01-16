@@ -36,7 +36,29 @@
 
 import sys, string, time, select, struct, argparse, collections
 
-from serial import Serial, SerialException, PARITY_NONE
+from serial import Serial, SerialException, PARITY_NONE, TERMIOS, TIOCMBIS, TIOCMBIC, TIOCM_RTS_str, TIOCM_DTR_str, TIOCM_DTR, TIOCM_RTS
+
+# # This needs pyserial version >= 2.6:
+# try:
+    # from serial.tools import list_ports
+# except ImportError:
+    # print "\nWARNING your python-serial version seems to be to old!\n"
+
+#
+# Note: pyserial 2.6.1 seems to have a bug with reconnect (read only garbage 
+# at second connect).
+# So i've mixed pyserial 2.5.x with the list_ports functions from 2.6.x
+#
+import list_ports
+
+# >>> list_ports.comports()
+# [('/dev/ttyS3', 'ttyS3', 'n/a'),
+#('/dev/ttyS2', 'ttyS2', 'n/a'),
+#('/dev/ttyS1', 'ttyS1', 'PNP0501'),
+#('/dev/ttyS0', 'ttyS0', 'PNP0501'),
+#('/dev/ttyUSB10', 'ttyUSB10', 'n/a'),
+#('/dev/ttyUSB0', 'Linux Foundation 2.0 root hub ', 'USB VID:PID=0403:f06f SNR=ELU2CSFC'),
+#('/dev/ttyACM0', 'ttyACM0', 'USB VID:PID=2341:0042 SNR=75237333536351815111')]
 
 class DummyEvent:
 
@@ -323,11 +345,13 @@ class Printer(Serial):
     endStoreToken = "Done saving"
     # Number of rx errors till we assume the
     # line is dead.
-    maxRXErrors = 50
+    maxRXErrors = 10
 
     def __init__(self):
 
         Serial.__init__(self)
+
+        self.usbId = None
 
         self.mode = None
         self.endTokens = None
@@ -364,6 +388,33 @@ class Printer(Serial):
         self.timeout = 0.05
         self.writeTimeout = 10
         self.open()
+
+        # Store usb information for later re-connection even if device
+        # name has changed:
+        comports = list_ports.comports()
+
+        # ('/dev/ttyACM0', 'ttyACM0', 'USB VID:PID=2341:0042 SNR=75237333536351815111')]
+        for (dev, name, usbid) in comports:
+            if dev == device or name == device:
+                print "Found usbid %s for device %s" % (usbid, dev)
+                self.usbId = usbid
+                break
+        
+    def reconnect(self):
+
+        # XXX add timeout, or otherwise prevent re-connection to power-cycled printer?!
+
+        comports = list_ports.comports()
+
+        # ('/dev/ttyACM0', 'ttyACM0', 'USB VID:PID=2341:0042 SNR=75237333536351815111')]
+        for (dev, name, usbid) in comports:
+            if usbid == self.usbId:
+                print "reconnect(): found device %s, previous device: %s" % (dev, self.port)
+                self.close()
+                self.initSerial(dev, br=self.baudrate)
+                return
+
+        time.sleep(0.1)
 
     def showMessage(self, s):
         print s
@@ -419,8 +470,7 @@ class Printer(Serial):
                 c = self.read()
                 # print "c: ", c
             except SerialException as ex:
-                if self.rxErrors < 5:
-                    print "Readline() Exception raised:", ex
+                print "Readline() Exception raised:", ex
 
                 self.rxErrors += 1
 
@@ -555,10 +605,12 @@ class Printer(Serial):
         try:
             recvLine = self.safeReadline()        
         except SERIALDISCON:
-            self.printing = False
-            self.postMonitor = 0
-            self.showError("Line disconnected in processCommand(). Can't do a reset! Check your printer!")
-            return False
+            # self.printing = False
+            # self.postMonitor = 0
+            # self.showError("Line disconnected in processCommand(). Can't do a reset! Check your printer!")
+            self.showError("Line disconnected in processCommand(). Trying reconnect!")
+            self.reconnect()
+            return True
 
         if not recvLine:
             return True
