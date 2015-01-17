@@ -34,9 +34,9 @@
 #   G11: 4
 # 
 
-import sys, string, time, select, struct, argparse, collections
+import sys, time, struct, argparse, collections
 
-from serial import Serial, SerialException, PARITY_NONE, TERMIOS, TIOCMBIS, TIOCMBIC, TIOCM_RTS_str, TIOCM_DTR_str, TIOCM_DTR, TIOCM_RTS
+from serial import Serial, SerialException 
 
 # # This needs pyserial version >= 2.6:
 # try:
