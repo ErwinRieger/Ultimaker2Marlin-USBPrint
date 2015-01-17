@@ -3252,36 +3252,37 @@ void doIdleTasks()
 
         if (usbCmd) {
 
-        if(strstr_P(usbCmd, PSTR("M29")) == NULL)
-        {
-
-            // SD write.
-            // card.write_command(usbCmd);
-            usbCmd[usbCommand.len] = '\n';
-            if (card.write_string(usbCmd, usbCommand.len+1)) {
-                SERIAL_ERROR_START;
-                SERIAL_ERRORLNPGM(MSG_SD_ERR_WRITE_TO_FILE);
-            }
-
-            #if 0
-            // XXX What is "SD Logging" and why do we process the
-            // command(s) here?
-            if(card.logging)
+            // if(strcmp_P(usbCmd, PSTR("M29")) == NULL)
+            if((usbCmd[0] != 'M') || (usbCmd[1] != '2') || (usbCmd[2] != '9'))
             {
-            process_commands();
+
+                // SD write.
+                // card.write_command(usbCmd);
+                usbCmd[usbCommand.len] = '\n';
+                if (card.write_string(usbCmd, usbCommand.len+1)) {
+                    SERIAL_ERROR_START;
+                    SERIAL_ERRORLNPGM(MSG_SD_ERR_WRITE_TO_FILE);
+                }
+
+                #if 0
+                // XXX What is "SD Logging" and why do we process the
+                // command(s) here?
+                if(card.logging)
+                {
+                process_commands();
+                }
+                else
+                {
+                // Command-cknowledge over serial line.
+                SERIAL_PROTOCOLLNPGM(MSG_OK);
+                }
+                #endif
             }
             else
             {
-            // Command-cknowledge over serial line.
-            SERIAL_PROTOCOLLNPGM(MSG_OK);
+                // End SD write.
+                card.endSaving();
             }
-            #endif
-        }
-        else
-        {
-            // End SD write.
-            card.endSaving();
-        }
         }
     }
     else {
