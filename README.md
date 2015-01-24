@@ -1,3 +1,42 @@
+
+About this fork
+===========================
+
+This firmware has a improved *print over USB* functionality compared with the standard Ultimaker2Marlin (and Marlin) firmware. I use it to print on a UltiMaker2 with direct connection over USB. The improvements are:
+
+    * Can print the UltiGCode flavor of the UltiMaker2.
+    * Uses the normal GUI setup code of the Ultimaker2Marlin firmware, so your material and temperature settings are applied (in contrast to printing reprap gcode over USB where you have to supply your own startup gcode).
+    * Can download/store gcode files onto the SD Card and print it subsequently.
+    * Can download/store gcode files onto the SD Card and print it at the same time while downloading (the gcode file on SD is used as a buffer).
+    * Improved serial handshake and error detection/correction.
+    * Compressed GCode is used to speed up download and to improve print quality (compared to the standard USB print, no more 'buffer underruns'/print stops).
+    * USB reconnect feature (with a current linux kernel on the host side). So no more print stops because of ESD or bad USB cables.
+
+
+
+:Note:
+
+You can't use your normal host printing software like stock Cura or PrintRun - they don't understand the used serial protocol and they can't produce compressed gcode. You can use a commandline
+utility *ultiprint.py* [ultiprint.py](https://github.com/ErwinRieger/Ultimaker2Marlin-USBPrint/tree/master/ultiprint) instead.
+A hacked version of Cura is currently developed here: [Cura-USBPrint](https://github.com/ErwinRieger/Cura-USBPrint).
+
+Documentation about the firmware is available here:  [Wiki](https://github.com/ErwinRieger/Ultimaker2Marlin-USBPrint/wiki). Ultiprint.py has its documentation here: [ultiprint.py](https://github.com/ErwinRieger/Ultimaker2Marlin-USBPrint/wiki/UltiPrint.py-Utility).
+
+:Note:
+
+Please do NOT post any questions/bugs/issues to the maintainers of the original Ultimaker2Marlin (or Marlin) software. Use the issue-tracker instead: [Issues](https://github.com/ErwinRieger/Ultimaker2Marlin-USBPrint/issues) or send a email
+to er-ri@gmx.net.
+
+The rest of this document is the original Readme from [Ultimaker2Marlin](https://github.com/Ultimaker/Ultimaker2Marlin).
+
+::
+
+  $LastChangedDate: 2015-01-24 01:06:32 +0100 (Sa, 24. Jan 2015) $
+  $Revision: 175 $
+
+
+-------------------------------
+
 ==========================
 Marlin 3D Printer Firmware
 ==========================
