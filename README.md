@@ -14,7 +14,8 @@ This firmware has a improved *print over USB* functionality compared with the st
 
 
 
-:Note:
+Note:
+-----
 
 You can't use your normal host printing software like stock Cura or PrintRun - they don't understand the used serial protocol and they can't produce compressed gcode. You can use a commandline
 utility [ultiprint.py](https://github.com/ErwinRieger/Ultimaker2Marlin-USBPrint/tree/master/ultiprint) instead.
@@ -22,15 +23,16 @@ A hacked version of Cura is currently developed here: [Cura-USBPrint](https://gi
 
 Documentation about the firmware is available here:  [Wiki](https://github.com/ErwinRieger/Ultimaker2Marlin-USBPrint/wiki). Ultiprint.py has its documentation here: [ultiprint.py](https://github.com/ErwinRieger/Ultimaker2Marlin-USBPrint/wiki/UltiPrint.py-Utility).
 
-:Note:
+Note:
+-----
 
 Please do NOT post any questions/bugs/issues to the maintainers of the original Ultimaker2Marlin (or Marlin) software. Use the issue-tracker instead: [Issues](https://github.com/ErwinRieger/Ultimaker2Marlin-USBPrint/issues) or send a email
 to er-ri@gmx.net.
 
 The rest of this document is the original Readme from [Ultimaker2Marlin](https://github.com/Ultimaker/Ultimaker2Marlin).
 
- $LastChangedDate: 2015-01-24 01:11:35 +0100 (Sa, 24. Jan 2015) $
- $Revision: 176 $
+    $LastChangedDate: 2015-01-24 01:17:32 +0100 (Sa, 24. Jan 2015) $
+    $Revision: 177 $
 
 
 -------------------------------
