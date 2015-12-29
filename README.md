@@ -1,4 +1,13 @@
 
+
+Note:
+-----
+
+This software is no longer maintained. The combination of Ultimaker2Marlin firmware and Mega2560 cpu is not able to do path-planning, stepper pulse generation, usb interface handling and so on 
+at high feedrates and/or high segment counts. Therefore i created a new (ultimaker) firmware with host side preprocessing: https://github.com/ErwinRieger/ddprint.
+
+-------------------------------
+
 About this fork
 ===========================
 
